@@ -6,7 +6,6 @@ export default function FeedPage() {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode] = useState(localStorage.getItem("theme") === "dark");
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [posts, setPosts] = useState(
     [...Array(10)].map((_, i) => ({
@@ -80,28 +79,6 @@ export default function FeedPage() {
             className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700"
             onClick={() => navigate("/profile")}
           />
-
-          {/* Dropdown */}
-          <div
-            className={`
-              absolute right-0 top-14 w-48 p-2 rounded-lg shadow-xl
-              bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700
-              transform transition-all duration-200 origin-top-right
-              ${settingsOpen
-                ? "opacity-100 scale-100 translate-y-0"
-                : "opacity-0 scale-95 -translate-y-2 pointer-events-none"}
-            `}
-          >
-            <button className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md cursor-pointer">
-              Profile Settings
-            </button>
-            <button className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md cursor-pointer">
-              Account
-            </button>
-            <button className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md cursor-pointer">
-              Help Center
-            </button>
-          </div>
         </div>
       </header>
 

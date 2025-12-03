@@ -112,9 +112,12 @@ export default function LoginPage() {
           {/* Sign up link */}
           <p className="text-center text-sm text-gray-600 dark:text-gray-400 mt-4">
             Don't have an account?{" "}
-            <a href="#" className="text-primary hover:underline cursor-pointer transition-colors">
+            <Link
+              to="/signup"
+              className="text-primary hover:underline cursor-pointer transition-colors"
+            >
               Sign up
-            </a>
+            </Link>
           </p>
         </form>
       </div>

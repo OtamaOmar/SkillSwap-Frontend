@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 
 import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage"; // ✅ Import the login page
+import SignUp from "./pages/SignUp"; // ✅ Import the sign up page
 import LearnMorePage from "./pages/LearnMorePage";
 import FeedPage from "./pages/FeedPage";
 import ProfilePage from "./pages/ProfilePage";
@@ -19,6 +20,9 @@ export default function App() {
 
         {/* 🔐 Login Page */}
         <Route path="/login" element={<LoginPage />} />
+
+        {/* ✍️ Sign Up Page */}
+        <Route path="/signup" element={<SignUp />} />
 
         {/* 📚 Learn More Page */}
         <Route path="/learn-more" element={<LearnMorePage />} />
