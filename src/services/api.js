@@ -1,8 +1,11 @@
 import axios from "axios";
 
-const BASE_URL = "http://localhost:4000";
-const API_URL = `${BASE_URL}/api`;
-const AUTH_URL = `${BASE_URL}/api/auth`;
+// Prefer relative API paths to leverage Nginx proxy in Docker runtime.
+// Fallback to VITE_API_BASE_URL for local dev if provided.
+const useRelative = !import.meta.env?.VITE_API_BASE_URL;
+const BASE_URL = useRelative ? "" : import.meta.env.VITE_API_BASE_URL;
+const API_URL = useRelative ? "/api" : `${BASE_URL}/api`;
+const AUTH_URL = useRelative ? "/api/auth" : `${BASE_URL}/api/auth`;
 
 // Create axios instance
 const axiosInstance = axios.create({
