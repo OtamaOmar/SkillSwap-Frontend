@@ -1,19 +1,6 @@
-# React + Vite
+# SkillSwap Frontend (Vite + React)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Runs against the SkillSwap backend on port 4000 and serves the SPA over Nginx. Default host port is 8000.
 
 ## Docker
 
@@ -26,14 +13,14 @@ docker build -t skillswap-frontend:latest .
 - Run with Docker
 
 ```bash
-docker run --rm -p 8080:80 skillswap-frontend:latest
+docker run --rm -p 8000:80 skillswap-frontend:latest
 ```
 
 - Run with Docker Compose
 
 ```bash
 docker compose up --build
-# Visit http://localhost:8080
+# Visit http://localhost:8000
 ```
 
 Notes:
@@ -83,11 +70,17 @@ This compose file runs the frontend, backend, and PostgreSQL together.
 
 ```bash
 docker compose up --build
-# Frontend: http://localhost:8080
+# Frontend: http://localhost:8000
 # Backend:  http://localhost:4000
-# Postgres: localhost:5432 (skillswap/skillswap)
+# Postgres: localhost:5432 (user: mora, password: Omar.2005, db: skillswap_db)
 ```
 
 The frontend talks to the backend via `http://backend:4000` inside the Docker network and `http://localhost:4000` from your host.
 
-Compose builds the backend from the local repo at `/home/mora/github/SkillSwap-Backend` using its `Dockerfile`. Ensure the backend Dockerfile binds to `PORT=4000` and connects to Postgres via `DATABASE_URL`.
+Compose builds the backend from the local repo at `/home/mora/github/SkillSwap-Backend` using its `Dockerfile`. Ensure the backend Dockerfile binds to `PORT=4000` and connects to Postgres via `DATABASE_URL=postgres://mora:Omar.2005@db:5432/skillswap_db`.
+
+### Railway deployment
+
+- Deploy workflow: `.github/workflows/railway-deploy.yml`
+- Required GitHub secrets: `RAILWAY_TOKEN`, `RAILWAY_PROJECT_ID`, `RAILWAY_FRONTEND_SERVICE`, and `VITE_API_BASE_URL` (point this at the public backend URL, e.g., `https://your-backend.up.railway.app`).
+- Trigger: push to `main` or manual dispatch.

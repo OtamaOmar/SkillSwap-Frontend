@@ -118,6 +118,7 @@ export default function SignUp() {
               name="fullName"
               type="text"
               required
+              autoComplete="name"
               className="px-4 py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 focus:ring-2 focus:ring-primary focus:outline-none transition"
               placeholder="John Doe"
             />
@@ -133,6 +134,7 @@ export default function SignUp() {
               name="email"
               type="email"
               required
+              autoComplete="email"
               className="px-4 py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 focus:ring-2 focus:ring-primary focus:outline-none transition"
               placeholder="you@example.com"
             />
