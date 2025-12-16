@@ -34,7 +34,7 @@ export default function SignUp() {
     setShowError(false);
 
     try {
-      // Call the registration API with Supabase
+      // Call the registration API (JWT backend)
       await registerUser(username, email, password, fullName);
       
       // Show success message

@@ -1,17 +1,20 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Menu, Search, Users, LogOut, Heart, MessageCircle, Share2, Plus, Mail, Bell, Home } from "lucide-react";
-import { getAllProfiles, getCurrentUserProfile, isAuthenticated } from "../services/api";
+import { getCurrentUserProfile, isAuthenticated, postAPI, friendshipsAPI } from "../services/api";
 
 export default function FeedPage() {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode] = useState(localStorage.getItem("theme") === "dark");
-  const [profiles, setProfiles] = useState([]);
+  const [posts, setPosts] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [friendSuggestions, setFriendSuggestions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [likeLoadingId, setLikeLoadingId] = useState(null);
+  const [commentText, setCommentText] = useState("");
+  const [commentPostId, setCommentPostId] = useState(null);
 
   // Authentication guard - redirect if not logged in
   useEffect(() => {
@@ -20,7 +23,7 @@ export default function FeedPage() {
     }
   }, [navigate]);
 
-  // Fetch current user and all profiles
+  // Fetch current user, posts feed, and friend suggestions
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -31,21 +34,14 @@ export default function FeedPage() {
         const userProfile = await getCurrentUserProfile();
         setCurrentUser(userProfile);
         
-        // Fetch all profiles
-        const allProfiles = await getAllProfiles();
-        
-        // Ensure allProfiles is an array
-        if (!Array.isArray(allProfiles)) {
-          throw new Error("Invalid profiles data format");
-        }
-        
-        // Filter out current user from profiles feed
-        const otherProfiles = allProfiles.filter(p => p.id !== userProfile.id);
-        setProfiles(otherProfiles);
-        
-        // Get random profiles for friend suggestions
-        const shuffled = [...otherProfiles].sort(() => 0.5 - Math.random());
-        setFriendSuggestions(shuffled.slice(0, 8));
+        // Fetch posts feed
+        const feedPosts = await postAPI.getAllPosts();
+        setPosts(Array.isArray(feedPosts) ? feedPosts : []);
+
+        // Fetch friend suggestions from backend
+        const suggestions = await friendshipsAPI.getSuggestions(8, 0);
+        const list = suggestions?.suggestions || [];
+        setFriendSuggestions(list);
         
       } catch (err) {
         console.error("FeedPage fetchData error:", err);
@@ -74,6 +70,48 @@ export default function FeedPage() {
       localStorage.setItem("theme", "light");
     }
   }, [darkMode]);
+
+  const toggleLike = async (postId, liked) => {
+    try {
+      setLikeLoadingId(postId);
+      if (liked) {
+        await postAPI.unlikePost(postId);
+      } else {
+        await postAPI.likePost(postId);
+      }
+      // Refresh posts minimally
+      const feedPosts = await postAPI.getAllPosts();
+      setPosts(Array.isArray(feedPosts) ? feedPosts : []);
+    } catch (e) {
+      console.error("toggleLike error:", e);
+    } finally {
+      setLikeLoadingId(null);
+    }
+  };
+
+  const submitComment = async (e) => {
+    e.preventDefault();
+    if (!commentPostId || !commentText.trim()) return;
+    try {
+      await postAPI.addComment(commentPostId, commentText.trim());
+      setCommentText("");
+      setCommentPostId(null);
+      const feedPosts = await postAPI.getAllPosts();
+      setPosts(Array.isArray(feedPosts) ? feedPosts : []);
+    } catch (e) {
+      console.error("submitComment error:", e);
+    }
+  };
+
+  const sendRequest = async (toUserId) => {
+    try {
+      await friendshipsAPI.sendFriendRequest(toUserId);
+      const suggestions = await friendshipsAPI.getSuggestions(8, 0);
+      setFriendSuggestions(suggestions?.suggestions || []);
+    } catch (e) {
+      console.error("sendRequest error:", e);
+    }
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-gray-900 text-black dark:text-white">
@@ -158,7 +196,7 @@ export default function FeedPage() {
           {/* Loading State */}
           {loading && (
             <div className="text-center py-10">
-              <p className="text-gray-500 dark:text-gray-400">Loading profiles...</p>
+              <p className="text-gray-500 dark:text-gray-400">Loading feed...</p>
             </div>
           )}
 
@@ -169,49 +207,53 @@ export default function FeedPage() {
             </div>
           )}
 
-          {/* Profiles Feed */}
-          {!loading && !error && profiles.length === 0 && (
+          {/* Posts Feed */}
+          {!loading && !error && posts.length === 0 && (
             <div className="text-center py-10">
-              <p className="text-gray-500 dark:text-gray-400">No profiles found. Be the first to join!</p>
+              <p className="text-gray-500 dark:text-gray-400">No posts yet. Create your first post!</p>
             </div>
           )}
 
-          {!loading && !error && profiles.length > 0 && (
+          {!loading && !error && posts.length > 0 && (
             <div className="space-y-6">
-              {profiles.map(profile => (
+              {posts.map(post => (
                 <div
-                  key={profile.id}
+                  key={post.id}
                   className="relative p-6 bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700"
                 >
                   {/* HEADER */}
                   <div className="flex items-center gap-4 mb-3">
                     <img
-                      src={profile.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.full_name || profile.username)}&background=10b981&color=fff`}
+                      src={post.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(post.full_name || post.username)}&background=10b981&color=fff`}
                       className="w-12 h-12 rounded-full border border-gray-300 dark:border-gray-700 object-cover"
-                      alt={profile.full_name || profile.username}
+                      alt={post.full_name || post.username}
                     />
                     <div>
-                      <h3 className="font-semibold">{profile.full_name || profile.username}</h3>
-                      <span className="text-sm text-gray-500 dark:text-gray-400">@{profile.username}</span>
+                      <h3 className="font-semibold">{post.full_name || post.username}</h3>
+                      <span className="text-sm text-gray-500 dark:text-gray-400">@{post.username}</span>
                     </div>
                   </div>
 
                   {/* CONTENT */}
                   <div className="mt-2">
-                    <p className="text-gray-600 dark:text-gray-300">
-                      Member since {new Date(profile.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                    </p>
-                    {profile.role && (
-                      <span className="inline-block mt-2 px-3 py-1 text-xs font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-full">
-                        {profile.role}
-                      </span>
+                    <p className="text-gray-800 dark:text-gray-200">{post.content}</p>
+                    {post.image_url && (
+                      <img src={post.image_url} alt="post" className="mt-3 rounded-lg max-h-96 object-cover w-full" />
                     )}
+                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                      Posted {new Date(post.created_at).toLocaleString()}
+                    </p>
                   </div>
 
                   {/* REACTIONS */}
                   <div className="flex items-center gap-6 mt-4 text-gray-500 dark:text-gray-400">
-                    <button className="flex items-center gap-1 hover:text-emerald-500 cursor-pointer transition">
-                      <Heart size={18} /> Like
+                    <button
+                      disabled={likeLoadingId === post.id}
+                      onClick={() => toggleLike(post.id, Boolean(post.user_liked))}
+                      className="flex items-center gap-1 hover:text-emerald-500 cursor-pointer transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Heart size={18} className={post.user_liked ? "text-emerald-500" : ""} />
+                      {post.user_liked ? "Unlike" : "Like"} ({post.likes_count || 0})
                     </button>
                     <button 
                       onClick={() => navigate("/chat")}
@@ -222,6 +264,19 @@ export default function FeedPage() {
                     <button className="flex items-center gap-1 hover:text-emerald-500 cursor-pointer transition">
                       <Share2 size={18} /> Share
                     </button>
+                  </div>
+
+                  {/* COMMENTS */}
+                  <div className="mt-4">
+                    <form onSubmit={submitComment} className="flex items-center gap-2">
+                      <input
+                        className="flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2"
+                        placeholder="Write a comment..."
+                        value={commentPostId === post.id ? commentText : ""}
+                        onChange={(e) => { setCommentPostId(post.id); setCommentText(e.target.value); }}
+                      />
+                      <button className="px-3 py-2 rounded-md bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer">Comment</button>
+                    </form>
                   </div>
                 </div>
               ))}
@@ -256,7 +311,7 @@ export default function FeedPage() {
                       </p>
                     </div>
                   </div>
-                  <button className="p-1.5 rounded-full hover:bg-emerald-500/20 text-emerald-500 transition cursor-pointer shrink-0">
+                  <button onClick={() => sendRequest(profile.id)} className="p-1.5 rounded-full hover:bg-emerald-500/20 text-emerald-500 transition cursor-pointer shrink-0">
                     <Plus size={18} />
                   </button>
                 </div>

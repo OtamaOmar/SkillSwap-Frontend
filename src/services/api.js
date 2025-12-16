@@ -85,7 +85,7 @@ axiosInstance.interceptors.response.use(
   }
 );
 
-// Register user (Supabase)
+// Register user (JWT auth)
 export const registerUser = async (username, email, password, full_name) => {
   try {
     const response = await axios.post(`${AUTH_URL}/signup`, {
@@ -112,7 +112,7 @@ export const registerUser = async (username, email, password, full_name) => {
   }
 };
 
-// Login user (Supabase)
+// Login user (JWT auth)
 export const loginUser = async (email, password) => {
   try {
     const response = await axios.post(`${AUTH_URL}/login`, {
@@ -320,30 +320,55 @@ export const skillsAPI = {
 
 // FRIENDSHIPS API OBJECT
 export const friendshipsAPI = {
+  // Accepted connections list
   getMyFriendships: async () => {
     const response = await axiosInstance.get(`${API_URL}/friendships`);
     return response.data;
   },
 
-  sendFriendRequest: async (friendId) => {
+  // Send friend request to other user id
+  sendFriendRequest: async (toUserId) => {
     const response = await axiosInstance.post(`${API_URL}/friendships/request`, {
-      friend_id: friendId,
+      toUserId,
     });
     return response.data;
   },
 
-  acceptFriendRequest: async (friendshipId) => {
-    const response = await axiosInstance.put(`${API_URL}/friendships/${friendshipId}/accept`);
+  // Pending requests directed to me
+  getIncomingRequests: async () => {
+    const response = await axiosInstance.get(`${API_URL}/friendships/requests/incoming`);
     return response.data;
   },
 
-  rejectFriendRequest: async (friendshipId) => {
-    const response = await axiosInstance.delete(`${API_URL}/friendships/${friendshipId}/reject`);
+  // Requests I have sent
+  getOutgoingRequests: async () => {
+    const response = await axiosInstance.get(`${API_URL}/friendships/requests/outgoing`);
     return response.data;
   },
 
-  unfriend: async (friendId) => {
-    const response = await axiosInstance.delete(`${API_URL}/friendships/${friendId}`);
+  // Accept a request from other user
+  acceptFriendRequest: async (otherUserId) => {
+    const response = await axiosInstance.patch(`${API_URL}/friendships/requests/${otherUserId}/accept`);
+    return response.data;
+  },
+
+  // Reject a request from other user
+  rejectFriendRequest: async (otherUserId) => {
+    const response = await axiosInstance.patch(`${API_URL}/friendships/requests/${otherUserId}/reject`);
+    return response.data;
+  },
+
+  // Remove friendship or cancel pending
+  unfriend: async (otherUserId) => {
+    const response = await axiosInstance.delete(`${API_URL}/friendships/${otherUserId}`);
+    return response.data;
+  },
+
+  // Friend suggestions
+  getSuggestions: async (limit = 20, offset = 0) => {
+    const response = await axiosInstance.get(`${API_URL}/friendships/suggestions`, {
+      params: { limit, offset },
+    });
     return response.data;
   },
 };
