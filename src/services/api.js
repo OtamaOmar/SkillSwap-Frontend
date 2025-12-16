@@ -282,6 +282,119 @@ export const postAPI = {
     const response = await axiosInstance.delete(`${API_URL}/posts/${postId}/like`);
     return response.data;
   },
+
+  deletePost: async (postId) => {
+    const response = await axiosInstance.delete(`${API_URL}/posts/${postId}`);
+    return response.data;
+  },
+
+  deleteComment: async (commentId) => {
+    const response = await axiosInstance.delete(`${API_URL}/comments/${commentId}`);
+    return response.data;
+  },
+
+  sharePost: async (postId) => {
+    const response = await axiosInstance.post(`${API_URL}/posts/${postId}/share`);
+    return response.data;
+  },
+
+  incrementViewCount: async (postId) => {
+    const response = await axiosInstance.post(`${API_URL}/posts/${postId}/view`);
+    return response.data;
+  },
+
+  addCommentReply: async (parentCommentId, content) => {
+    const response = await axiosInstance.post(
+      `${API_URL}/comments/${parentCommentId}/replies`,
+      { content }
+    );
+    return response.data;
+  },
+
+  searchPosts: async (query, limit = 20) => {
+    const response = await axiosInstance.get(`${API_URL}/posts/search`, {
+      params: { q: query, limit },
+    });
+    return response.data;
+  },
+};
+
+// NOTIFICATIONS API OBJECT
+export const notificationsAPI = {
+  getNotifications: async (limit = 20, offset = 0) => {
+    const response = await axiosInstance.get(`${API_URL}/notifications`, {
+      params: { limit, offset },
+    });
+    return response.data;
+  },
+
+  getUnreadCount: async () => {
+    const response = await axiosInstance.get(`${API_URL}/notifications/unread-count`);
+    return response.data;
+  },
+
+  markAsRead: async (notificationId) => {
+    const response = await axiosInstance.put(
+      `${API_URL}/notifications/${notificationId}/read`
+    );
+    return response.data;
+  },
+
+  markAllAsRead: async () => {
+    const response = await axiosInstance.put(`${API_URL}/notifications/mark-all-read`);
+    return response.data;
+  },
+
+  deleteNotification: async (notificationId) => {
+    const response = await axiosInstance.delete(`${API_URL}/notifications/${notificationId}`);
+    return response.data;
+  },
+};
+
+// MESSAGES API OBJECT
+export const messagesAPI = {
+  sendMessage: async (receiver_id, content) => {
+    const response = await axiosInstance.post(`${API_URL}/messages`, {
+      receiver_id,
+      content,
+    });
+    return response.data;
+  },
+
+  getConversation: async (userId) => {
+    const response = await axiosInstance.get(`${API_URL}/messages/conversation/${userId}`);
+    return response.data;
+  },
+
+  getAllConversations: async () => {
+    const response = await axiosInstance.get(`${API_URL}/conversations`);
+    return response.data;
+  },
+
+  markAsRead: async (messageId) => {
+    const response = await axiosInstance.put(`${API_URL}/messages/${messageId}/read`);
+    return response.data;
+  },
+
+  markConversationAsRead: async (userId) => {
+    const response = await axiosInstance.put(`${API_URL}/conversations/${userId}/read`);
+    return response.data;
+  },
+
+  deleteMessage: async (messageId) => {
+    const response = await axiosInstance.delete(`${API_URL}/messages/${messageId}`);
+    return response.data;
+  },
+};
+
+// SEARCH API OBJECT
+export const searchAPI = {
+  searchPosts: async (query, limit = 20) => {
+    const response = await axiosInstance.get(`${API_URL}/posts/search`, {
+      params: { q: query, limit },
+    });
+    return response.data;
+  },
 };
 
 // SKILLS API OBJECT

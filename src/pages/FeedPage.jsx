@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Menu, Search, Users, LogOut, Heart, MessageCircle, Share2, Plus, Mail, Bell, Home } from "lucide-react";
-import { getCurrentUserProfile, isAuthenticated, postAPI, friendshipsAPI } from "../services/api";
+import { Menu, Search, Users, LogOut, Heart, MessageCircle, Share2, Plus, Mail, Bell, Home, X, Eye } from "lucide-react";
+import { getCurrentUserProfile, isAuthenticated, postAPI, friendshipsAPI, notificationsAPI, searchAPI, getAllUsers } from "../services/api";
 
 export default function FeedPage() {
   const navigate = useNavigate();
@@ -15,6 +15,17 @@ export default function FeedPage() {
   const [likeLoadingId, setLikeLoadingId] = useState(null);
   const [commentText, setCommentText] = useState("");
   const [commentPostId, setCommentPostId] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [replyText, setReplyText] = useState("");
+  const [expandedPostId, setExpandedPostId] = useState(null);
+  const [newPostContent, setNewPostContent] = useState("");
+  const [newPostImageUrl, setNewPostImageUrl] = useState("");
 
   // Authentication guard - redirect if not logged in
   useEffect(() => {
@@ -26,30 +37,54 @@ export default function FeedPage() {
   // Fetch current user, posts feed, and friend suggestions
   useEffect(() => {
     const fetchData = async () => {
+      setLoading(true);
+      setError("");
       try {
-        setLoading(true);
-        setError("");
-        
-        // Fetch current user profile
+        // Fetch current user profile first (auth gate)
         const userProfile = await getCurrentUserProfile();
         setCurrentUser(userProfile);
-        
-        // Fetch posts feed
+
+        // Fetch posts feed (critical)
         const feedPosts = await postAPI.getAllPosts();
         setPosts(Array.isArray(feedPosts) ? feedPosts : []);
-
-        // Fetch friend suggestions from backend
-        const suggestions = await friendshipsAPI.getSuggestions(8, 0);
-        const list = suggestions?.suggestions || [];
-        setFriendSuggestions(list);
-        
       } catch (err) {
-        console.error("FeedPage fetchData error:", err);
-        setError(err.message || "Failed to load data");
-        // If authentication error, redirect to login
-        if (err.message.includes("token") || err.message.includes("authentication")) {
+        console.error("FeedPage critical fetch error:", err);
+        setError(err.message || "Failed to load feed");
+        if (err.message?.toLowerCase().includes("token") || err.message?.toLowerCase().includes("authentication")) {
           navigate("/login", { replace: true });
         }
+        setLoading(false);
+        return;
+      }
+
+      // Non-critical: friend suggestions and notifications
+      try {
+        console.log("Fetching all users for friend suggestions...");
+        const allUsers = await getAllUsers();
+        console.log("All users received:", allUsers);
+        // Filter out current user and show other real users
+        const usersArray = Array.isArray(allUsers) ? allUsers : [];
+        let otherUsers = usersArray.filter(user => user.id !== userProfile.id).slice(0, 8);
+        // Fallback: if filtering removed everyone (e.g., single-user DB), show first few users
+        if (otherUsers.length === 0 && usersArray.length > 0) {
+          otherUsers = usersArray.slice(0, 8);
+        }
+        console.log("Filtered other users:", otherUsers);
+        setFriendSuggestions(otherUsers);
+      } catch (e) {
+        console.error("Friend suggestions failed (non-blocking)", e?.message || e, e);
+        setFriendSuggestions([]);
+      }
+
+      try {
+        const notifs = await notificationsAPI.getNotifications();
+        setNotifications(Array.isArray(notifs) ? notifs : []);
+        const unread = await notificationsAPI.getUnreadCount();
+        setUnreadCount(unread?.unread_count || 0);
+      } catch (e) {
+        console.warn("Notifications fetch failed (non-blocking)", e?.message || e);
+        setNotifications([]);
+        setUnreadCount(0);
       } finally {
         setLoading(false);
       }
@@ -94,12 +129,98 @@ export default function FeedPage() {
     if (!commentPostId || !commentText.trim()) return;
     try {
       await postAPI.addComment(commentPostId, commentText.trim());
+      const postIdToExpand = commentPostId;
       setCommentText("");
       setCommentPostId(null);
       const feedPosts = await postAPI.getAllPosts();
       setPosts(Array.isArray(feedPosts) ? feedPosts : []);
+      // Keep the post expanded to show the new comment
+      setExpandedPostId(postIdToExpand);
     } catch (e) {
       console.error("submitComment error:", e);
+    }
+  };
+
+  const handleSearch = async (e) => {
+    const query = e.target.value;
+    setSearchQuery(query);
+    
+    if (!query.trim()) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+    
+    try {
+      setIsSearching(true);
+      const results = await searchAPI.searchPosts(query);
+      setSearchResults(Array.isArray(results) ? results : []);
+    } catch (err) {
+      console.error("Search error:", err);
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleShare = async (postId) => {
+    try {
+      await postAPI.sharePost(postId);
+      const feedPosts = await postAPI.getAllPosts();
+      setPosts(Array.isArray(feedPosts) ? feedPosts : []);
+    } catch (e) {
+      console.error("Share error:", e);
+    }
+  };
+
+  const submitNewPost = async (e) => {
+    e.preventDefault();
+    const content = newPostContent.trim();
+    if (!content) return;
+    try {
+      await postAPI.createPost(content, newPostImageUrl.trim() || null);
+      setNewPostContent("");
+      setNewPostImageUrl("");
+      const feedPosts = await postAPI.getAllPosts();
+      setPosts(Array.isArray(feedPosts) ? feedPosts : []);
+    } catch (err) {
+      console.error("Create post error:", err);
+      setError(err.message || "Failed to create post");
+    }
+  };
+
+  const handleReply = async (commentId) => {
+    if (!replyText.trim()) return;
+    try {
+      await postAPI.addCommentReply(commentId, replyText.trim());
+      setReplyText("");
+      setReplyingTo(null);
+      const feedPosts = await postAPI.getAllPosts();
+      setPosts(Array.isArray(feedPosts) ? feedPosts : []);
+    } catch (e) {
+      console.error("Reply error:", e);
+    }
+  };
+
+  const markNotificationAsRead = async (notifId) => {
+    try {
+      await notificationsAPI.markAsRead(notifId);
+      const notifs = await notificationsAPI.getNotifications();
+      setNotifications(Array.isArray(notifs) ? notifs : []);
+      const unread = await notificationsAPI.getUnreadCount();
+      setUnreadCount(unread?.unread_count || 0);
+    } catch (e) {
+      console.error("Mark as read error:", e);
+    }
+  };
+
+  const deleteNotification = async (notifId) => {
+    try {
+      await notificationsAPI.deleteNotification(notifId);
+      const notifs = await notificationsAPI.getNotifications();
+      setNotifications(Array.isArray(notifs) ? notifs : []);
+    } catch (e) {
+      console.error("Delete notification error:", e);
     }
   };
 
@@ -135,15 +256,68 @@ export default function FeedPage() {
           <div className="relative w-full max-w-md">
             <input
               type="text"
-              placeholder="Search..."
+              placeholder="Search posts..."
+              value={searchQuery}
+              onChange={handleSearch}
               className="w-full rounded-full border border-gray-300 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 px-4 py-2 pl-10 text-base"
             />
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-300" size={20} />
           </div>
         </div>
 
-        {/* PROFILE + MENU */}
+        {/* PROFILE + NOTIFICATIONS */}
         <div className="relative flex items-center gap-4">
+          <div className="relative">
+            <button 
+              onClick={() => setShowNotifications(!showNotifications)}
+              className="relative p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+            >
+              <Bell size={20} />
+              {unreadCount > 0 && (
+                <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+
+            {/* Notifications Dropdown */}
+            {showNotifications && (
+              <div className="absolute right-0 top-12 w-80 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
+                <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+                  <h3 className="font-semibold">Notifications</h3>
+                </div>
+                {notifications.length === 0 ? (
+                  <div className="p-4 text-center text-gray-500 dark:text-gray-400">No notifications</div>
+                ) : (
+                  notifications.map(notif => (
+                    <div key={notif.id} className={`p-4 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 ${!notif.read_at ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex-1">
+                          <p className="text-sm text-gray-800 dark:text-gray-200">{notif.content}</p>
+                          <span className="text-xs text-gray-500 dark:text-gray-400 mt-1">{new Date(notif.created_at).toLocaleString()}</span>
+                        </div>
+                        <button 
+                          onClick={() => deleteNotification(notif.id)}
+                          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                      {!notif.read_at && (
+                        <button 
+                          onClick={() => markNotificationAsRead(notif.id)}
+                          className="mt-2 text-xs text-emerald-600 dark:text-emerald-400 hover:underline"
+                        >
+                          Mark as read
+                        </button>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          
           <img
             src={currentUser?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser?.full_name || currentUser?.username || 'User')}&background=10b981&color=fff`}
             alt="Profile"
@@ -191,7 +365,35 @@ export default function FeedPage() {
           className={`flex-1 p-6 transition-all duration-300 overflow-y-auto
             ${sidebarOpen ? "ml-64" : "ml-16"} mr-80`}
         >
-          <h2 className="text-3xl font-bold mb-6">Your Feed</h2>
+          <h2 className="text-3xl font-bold mb-6">
+            {searchQuery ? `Search Results for "${searchQuery}"` : "Your Feed"}
+          </h2>
+
+          {/* Create New Post */}
+          {!searchQuery && (
+            <form onSubmit={submitNewPost} className="mb-6 p-4 bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700">
+              <div className="mb-3">
+                <textarea
+                  value={newPostContent}
+                  onChange={(e) => setNewPostContent(e.target.value)}
+                  placeholder="What's on your mind?"
+                  className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2 min-h-24"
+                />
+              </div>
+              <div className="mb-3">
+                <input
+                  type="url"
+                  value={newPostImageUrl}
+                  onChange={(e) => setNewPostImageUrl(e.target.value)}
+                  placeholder="Optional image URL"
+                  className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2"
+                />
+              </div>
+              <div className="flex justify-end">
+                <button className="px-4 py-2 rounded-md bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer">Post</button>
+              </div>
+            </form>
+          )}
 
           {/* Loading State */}
           {loading && (
@@ -207,31 +409,53 @@ export default function FeedPage() {
             </div>
           )}
 
-          {/* Posts Feed */}
-          {!loading && !error && posts.length === 0 && (
+          {/* Posts Feed or Search Results */}
+          {!loading && !error && (searchQuery ? searchResults : posts).length === 0 && (
             <div className="text-center py-10">
-              <p className="text-gray-500 dark:text-gray-400">No posts yet. Create your first post!</p>
+              <p className="text-gray-500 dark:text-gray-400">
+                {searchQuery ? "No posts found." : "No posts yet. Create your first post!"}
+              </p>
             </div>
           )}
 
-          {!loading && !error && posts.length > 0 && (
+          {!loading && !error && (searchQuery ? searchResults : posts).length > 0 && (
             <div className="space-y-6">
-              {posts.map(post => (
+              {(searchQuery ? searchResults : posts).map(post => (
                 <div
                   key={post.id}
                   className="relative p-6 bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700"
                 >
                   {/* HEADER */}
-                  <div className="flex items-center gap-4 mb-3">
-                    <img
-                      src={post.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(post.full_name || post.username)}&background=10b981&color=fff`}
-                      className="w-12 h-12 rounded-full border border-gray-300 dark:border-gray-700 object-cover"
-                      alt={post.full_name || post.username}
-                    />
-                    <div>
-                      <h3 className="font-semibold">{post.full_name || post.username}</h3>
-                      <span className="text-sm text-gray-500 dark:text-gray-400">@{post.username}</span>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-4">
+                      <img
+                        src={post.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(post.full_name || post.username)}&background=10b981&color=fff`}
+                        className="w-12 h-12 rounded-full border border-gray-300 dark:border-gray-700 object-cover"
+                        alt={post.full_name || post.username}
+                      />
+                      <div>
+                        <h3 className="font-semibold">{post.full_name || post.username}</h3>
+                        <span className="text-sm text-gray-500 dark:text-gray-400">@{post.username}</span>
+                      </div>
                     </div>
+                    {currentUser?.id === post.user_id && (
+                      <button 
+                        onClick={async () => {
+                          if (confirm("Delete this post?")) {
+                            try {
+                              await postAPI.deletePost(post.id);
+                              const feedPosts = await postAPI.getAllPosts();
+                              setPosts(Array.isArray(feedPosts) ? feedPosts : []);
+                            } catch (e) {
+                              console.error("Delete error:", e);
+                            }
+                          }
+                        }}
+                        className="text-gray-400 hover:text-red-500 transition"
+                      >
+                        ×
+                      </button>
+                    )}
                   </div>
 
                   {/* CONTENT */}
@@ -240,9 +464,13 @@ export default function FeedPage() {
                     {post.image_url && (
                       <img src={post.image_url} alt="post" className="mt-3 rounded-lg max-h-96 object-cover w-full" />
                     )}
-                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                      Posted {new Date(post.created_at).toLocaleString()}
-                    </p>
+                    <div className="mt-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                      <span>Posted {new Date(post.created_at).toLocaleString()}</span>
+                      <div className="flex items-center gap-2">
+                        <Eye size={16} />
+                        <span>{post.view_count || 0} views</span>
+                      </div>
+                    </div>
                   </div>
 
                   {/* REACTIONS */}
@@ -256,18 +484,74 @@ export default function FeedPage() {
                       {post.user_liked ? "Unlike" : "Like"} ({post.likes_count || 0})
                     </button>
                     <button 
-                      onClick={() => navigate("/chat")}
+                      onClick={() => setExpandedPostId(expandedPostId === post.id ? null : post.id)}
                       className="flex items-center gap-1 hover:text-emerald-500 cursor-pointer transition"
                     >
-                      <MessageCircle size={18} /> Message
+                      <MessageCircle size={18} /> Comment ({post.comments_count || 0})
                     </button>
-                    <button className="flex items-center gap-1 hover:text-emerald-500 cursor-pointer transition">
-                      <Share2 size={18} /> Share
+                    <button 
+                      onClick={() => handleShare(post.id)}
+                      className="flex items-center gap-1 hover:text-emerald-500 cursor-pointer transition"
+                    >
+                      <Share2 size={18} /> Share ({post.shares_count || 0})
                     </button>
                   </div>
 
                   {/* COMMENTS */}
-                  <div className="mt-4">
+                  <div className="mt-4 space-y-3">
+                    {expandedPostId === post.id && post.comments && post.comments.length > 0 && (
+                      <div className="space-y-2 mb-3 pl-4 border-l-2 border-gray-300 dark:border-gray-700">
+                        {post.comments.map(comment => (
+                          <div key={comment.id} className="text-sm">
+                            <div className="flex gap-2">
+                              <img 
+                                src={comment.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(comment.username)}&background=10b981&color=fff`}
+                                alt={comment.username}
+                                className="w-6 h-6 rounded-full"
+                              />
+                              <div className="flex-1">
+                                <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{comment.username}</p>
+                                <p className="text-gray-700 dark:text-gray-300">{comment.content}</p>
+                                <button 
+                                  onClick={() => setReplyingTo(comment.id)}
+                                  className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline mt-1"
+                                >
+                                  Reply
+                                </button>
+                                
+                                {replyingTo === comment.id && (
+                                  <div className="mt-2 flex gap-2">
+                                    <input 
+                                      type="text"
+                                      placeholder="Reply..."
+                                      value={replyText}
+                                      onChange={(e) => setReplyText(e.target.value)}
+                                      className="flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-2 py-1 text-sm"
+                                    />
+                                    <button 
+                                      onClick={() => handleReply(comment.id)}
+                                      className="px-2 py-1 rounded-md bg-emerald-500 text-white text-sm hover:bg-emerald-600 cursor-pointer"
+                                    >
+                                      Send
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        setReplyingTo(null);
+                                        setReplyText("");
+                                      }}
+                                      className="px-2 py-1 rounded-md bg-gray-300 dark:bg-gray-700 text-sm hover:bg-gray-400 cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
                     <form onSubmit={submitComment} className="flex items-center gap-2">
                       <input
                         className="flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2"

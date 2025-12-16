@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Menu, Search, Users, LogOut, Send, Bell, Mail, ArrowLeft } from "lucide-react";
+import { messagesAPI, getCurrentUserProfile } from "../services/api";
 
 export default function ChatPage() {
   const navigate = useNavigate();
@@ -9,24 +10,12 @@ export default function ChatPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedChat, setSelectedChat] = useState(null);
   const [messageInput, setMessageInput] = useState("");
-
-  const [chats] = useState(
-    [...Array(8)].map((_, i) => ({
-      id: i,
-      name: `User ${i + 20}`,
-      lastMessage: `Hey! This is the last message from conversation ${i + 1}`,
-      time: `${i + 1}h ago`,
-      unread: i % 3 === 0 ? i + 1 : 0,
-      avatar: `https://i.pravatar.cc/40?img=${i + 20}`
-    }))
-  );
-
-  const [messages, setMessages] = useState([
-    { id: 1, sender: "them", text: "Hey! How are you?", time: "10:30 AM" },
-    { id: 2, sender: "me", text: "I'm doing great! How about you?", time: "10:32 AM" },
-    { id: 3, sender: "them", text: "Pretty good! Want to exchange skills?", time: "10:33 AM" },
-    { id: 4, sender: "me", text: "Sure! What skills are you interested in?", time: "10:35 AM" },
-  ]);
+  
+  // Real data from API
+  const [chats, setChats] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (darkMode) {
@@ -38,18 +27,64 @@ export default function ChatPage() {
     }
   }, [darkMode]);
 
-  const handleSendMessage = () => {
-    if (messageInput.trim() && selectedChat !== null) {
-      setMessages([
-        ...messages,
-        {
-          id: messages.length + 1,
-          sender: "me",
-          text: messageInput,
-          time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-        }
-      ]);
+  // Load conversations on mount
+  useEffect(() => {
+    loadConversations();
+    loadCurrentUser();
+  }, []);
+
+  const loadCurrentUser = async () => {
+    try {
+      const user = await getCurrentUserProfile();
+      setCurrentUser(user);
+    } catch (err) {
+      console.error("Failed to load current user:", err);
+    }
+  };
+
+  const loadConversations = async () => {
+    try {
+      setLoading(true);
+      const conversations = await messagesAPI.getAllConversations();
+      setChats(Array.isArray(conversations) ? conversations : []);
+    } catch (err) {
+      console.error("Failed to load conversations:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadChatMessages = async (userId) => {
+    try {
+      setLoading(true);
+      const conversation = await messagesAPI.getConversation(userId);
+      setMessages(Array.isArray(conversation) ? conversation : []);
+      // Mark all as read
+      await messagesAPI.markConversationAsRead(userId);
+    } catch (err) {
+      console.error("Failed to load messages:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelectChat = (chat) => {
+    setSelectedChat(chat.user_id);
+    loadChatMessages(chat.user_id);
+  };
+
+  const handleSendMessage = async () => {
+    if (!messageInput.trim() || !selectedChat) return;
+
+    try {
+      await messagesAPI.sendMessage(selectedChat, messageInput);
       setMessageInput("");
+      // Reload chat messages
+      await loadChatMessages(selectedChat);
+      // Reload conversations
+      await loadConversations();
+    } catch (err) {
+      console.error("Failed to send message:", err);
     }
   };
 
@@ -150,39 +185,40 @@ export default function ChatPage() {
           <div className="p-3">
             <h2 className="text-xl font-bold mb-3 text-white px-2">Chats</h2>
             <div className="space-y-0">
-              {chats.map((chat) => (
-                <div
-                  key={chat.id}
-                  onClick={() => setSelectedChat(chat.id)}
-                  className={`p-3 cursor-pointer transition-colors border-b border-gray-800 dark:border-gray-800 ${
-                    selectedChat === chat.id
-                      ? "bg-gray-800 dark:bg-gray-800"
-                      : "hover:bg-gray-800 dark:hover:bg-gray-800"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <img
-                      src={chat.avatar}
-                      alt={chat.name}
-                      className="w-12 h-12 rounded-full"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <h3 className="font-semibold text-sm text-white">{chat.name}</h3>
-                        <span className="text-xs text-gray-400">{chat.time}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm text-gray-400 truncate flex-1">{chat.lastMessage}</p>
-                        {chat.unread > 0 && (
-                          <span className="ml-2 flex-shrink-0 w-5 h-5 flex items-center justify-center text-xs bg-emerald-500 text-white rounded-full">
-                            {chat.unread}
-                          </span>
-                        )}
+              {loading ? (
+                <div className="p-4 text-center text-gray-400">Loading conversations...</div>
+              ) : chats.length === 0 ? (
+                <div className="p-4 text-center text-gray-400">No conversations yet</div>
+              ) : (
+                chats.map((chat) => (
+                  <div
+                    key={chat.user_id}
+                    onClick={() => handleSelectChat(chat)}
+                    className={`p-3 cursor-pointer transition-colors border-b border-gray-800 dark:border-gray-800 ${
+                      selectedChat === chat.user_id
+                        ? "bg-gray-800 dark:bg-gray-800"
+                        : "hover:bg-gray-800 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={chat.avatar_url || `https://i.pravatar.cc/40?img=${chat.user_id}`}
+                        alt={chat.username}
+                        className="w-12 h-12 rounded-full"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <h3 className="font-semibold text-sm text-white">{chat.username || chat.full_name}</h3>
+                          <span className="text-xs text-gray-400">{chat.last_message_time || "now"}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm text-gray-400 truncate flex-1">{chat.last_message || "No messages yet"}</p>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </aside>
@@ -191,42 +227,54 @@ export default function ChatPage() {
         <main
           className={`flex-1 flex flex-col transition-all duration-300 ${sidebarOpen ? "ml-160" : "ml-112"} mr-0`}
         >
-          {selectedChat !== null ? (
+          {selectedChat !== null && chats.length > 0 ? (
             <>
               {/* Chat Header */}
-             <div className="h-16 bg-red-800 dark:bg-gray-800 border-b border-gray-700 dark:border-gray-700 px-6 flex items-center gap-4">
-                <img
-                  src={chats[selectedChat]?.avatar}
-                  alt={chats[selectedChat]?.name}
-                  className="w-10 h-10 rounded-full"
-                />
-                <div>
-                  <h3 className="font-semibold text-white">{chats[selectedChat]?.name}</h3>
-                  <span className="text-xs text-gray-400">Active now</span>
-                </div>
-              </div>
+              {(() => {
+                const selectedChatData = chats.find(c => c.user_id === selectedChat);
+                return selectedChatData ? (
+                  <div className="h-16 bg-red-800 dark:bg-gray-800 border-b border-gray-700 dark:border-gray-700 px-6 flex items-center gap-4">
+                    <img
+                      src={selectedChatData.avatar_url || `https://i.pravatar.cc/40?img=${selectedChatData.user_id}`}
+                      alt={selectedChatData.username}
+                      className="w-10 h-10 rounded-full"
+                    />
+                    <div>
+                      <h3 className="font-semibold text-white">{selectedChatData.username || selectedChatData.full_name}</h3>
+                      <span className="text-xs text-gray-400">Active now</span>
+                    </div>
+                  </div>
+                ) : null;
+              })()}
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-6 space-y-3 bg-gray-900 dark:bg-gray-950">
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`flex ${message.sender === "me" ? "justify-end" : "justify-start"}`}
-                  >
+                {loading ? (
+                  <div className="flex items-center justify-center h-full text-gray-400">Loading messages...</div>
+                ) : messages.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-gray-400">No messages yet. Start the conversation!</div>
+                ) : (
+                  messages.map((message) => (
                     <div
-                      className={`max-w-md px-4 py-2 rounded-lg ${
-                        message.sender === "me"
-                          ? "bg-emerald-600 text-white rounded-br-none"
-                          : "bg-gray-800 text-white rounded-bl-none"
-                      }`}
+                      key={message.id}
+                      className={`flex ${message.sender_id === currentUser?.id ? "justify-end" : "justify-start"}`}
                     >
-                      <p className="text-sm">{message.text}</p>
-                      <span className={`text-xs block text-right mt-1 ${message.sender === "me" ? "text-emerald-100" : "text-gray-400"}`}>
-                        {message.time}
-                      </span>
+                      <div
+                        className={`max-w-md px-4 py-2 rounded-lg ${
+                          message.sender_id === currentUser?.id
+                            ? "bg-emerald-600 text-white rounded-br-none"
+                            : "bg-gray-800 text-white rounded-bl-none"
+                        }`}
+                      >
+                        <p className="text-sm">{message.content}</p>
+                        <span className={`text-xs block text-right mt-1 ${message.sender_id === currentUser?.id ? "text-emerald-100" : "text-gray-400"}`}>
+                          {new Date(message.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                          {message.read_at && <span> ✓✓</span>}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
 
               {/* Message Input */}

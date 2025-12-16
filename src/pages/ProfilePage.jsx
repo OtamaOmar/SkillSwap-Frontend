@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Menu, Search, Users, LogOut, Mail, Bell, Edit, Camera, MapPin, Calendar, Award, Home, Heart, MessageCircle, Share2, Send } from "lucide-react";
-import { userAPI } from "../services/api";
+import { Menu, Search, Users, LogOut, Mail, Bell, Edit, Camera, MapPin, Calendar, Award, Home, Heart, MessageCircle, Share2, Send, Trash2, Eye } from "lucide-react";
+import { userAPI, postAPI } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 
 export default function ProfilePage() {
@@ -615,9 +615,43 @@ export default function ProfilePage() {
                           <button className="flex items-center gap-1 hover:text-blue-500 transition">
                             <MessageCircle size={18} /> <span>{post.comments_count || 0}</span>
                           </button>
-                          <button className="flex items-center gap-1 hover:text-green-500 transition">
+                          <button 
+                            onClick={async () => {
+                              try {
+                                await postAPI.sharePost(post.id);
+                                // Reload posts to update count
+                                const posts = await userAPI.getUserPosts(post.user_id);
+                                setUserPosts(posts);
+                              } catch (e) {
+                                console.error("Share error:", e);
+                              }
+                            }}
+                            className="flex items-center gap-1 hover:text-green-500 transition"
+                          >
                             <Share2 size={18} /> <span>{post.shares_count || 0}</span>
                           </button>
+                          <div className="flex items-center gap-1 text-gray-500">
+                            <Eye size={18} /> <span>{post.view_count || 0}</span>
+                          </div>
+                          {isOwnProfile && (
+                            <button 
+                              onClick={async () => {
+                                if (confirm("Delete this post?")) {
+                                  try {
+                                    await postAPI.deletePost(post.id);
+                                    // Reload posts
+                                    const posts = await userAPI.getUserPosts(profile.id);
+                                    setUserPosts(posts);
+                                  } catch (e) {
+                                    console.error("Delete error:", e);
+                                  }
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-red-600 transition ml-auto"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
