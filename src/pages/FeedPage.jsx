@@ -211,19 +211,15 @@ export default function FeedPage() {
     
     if (!query.trim()) {
       setSearchResults([]);
-      setIsSearching(false);
       return;
     }
     
     try {
-      setIsSearching(true);
       const results = await searchAPI.searchPosts(query);
       setSearchResults(Array.isArray(results) ? results : []);
     } catch (err) {
       console.error("Search error:", err);
       setSearchResults([]);
-    } finally {
-      setIsSearching(false);
     }
   };
 
