@@ -33,6 +33,7 @@ export default function App() {
 
         {/* 👤 PROFILE PAGE (Protected) */}
         <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+        <Route path="/profile/:id" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
 
         {/* 💬 CHAT PAGE (Protected) */}
         <Route path="/chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />

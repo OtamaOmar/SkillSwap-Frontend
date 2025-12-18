@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Menu, Search, Users, LogOut, Mail, Bell, Edit, Camera, MapPin, Calendar, Award, Home, Heart, MessageCircle, Share2, Send, Trash2, Eye } from "lucide-react";
-import { userAPI, postAPI } from "../services/api";
+import { userAPI, postAPI, friendshipsAPI } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 
 export default function ProfilePage() {
@@ -30,6 +30,10 @@ export default function ProfilePage() {
     location: "",
     country: ""
   });
+  const [requestingFriend, setRequestingFriend] = useState(false);
+  const [requestFeedback, setRequestFeedback] = useState("");
+  const [relationship, setRelationship] = useState("none"); // none | pending_outgoing | pending_incoming | accepted
+  const [actionLoading, setActionLoading] = useState(false);
 
   // DARK MODE
   useEffect(() => {
@@ -68,6 +72,35 @@ export default function ProfilePage() {
 
       // Load user posts
       loadUserPosts(userId);
+
+      // If viewing another user's profile, determine relationship status
+      if (id) {
+        try {
+          const connectionsRes = await friendshipsAPI.getMyFriendships();
+          const isFriend = Array.isArray(connectionsRes?.connections)
+            && connectionsRes.connections.some(c => String(c?.user?.id) === String(id));
+          if (isFriend) {
+            setRelationship("accepted");
+          } else {
+            const outgoingRes = await friendshipsAPI.getOutgoingRequests();
+            const isPendingOutgoing = Array.isArray(outgoingRes?.requests)
+              && outgoingRes.requests.some(r => String(r?.target_id) === String(id));
+            if (isPendingOutgoing) {
+              setRelationship("pending_outgoing");
+            } else {
+              const incomingRes = await friendshipsAPI.getIncomingRequests();
+              const isPendingIncoming = Array.isArray(incomingRes?.requests)
+                && incomingRes.requests.some(r => String(r?.requester_id) === String(id));
+              setRelationship(isPendingIncoming ? "pending_incoming" : "none");
+            }
+          }
+        } catch (relErr) {
+          console.warn("Failed to compute relationship status:", relErr?.message || relErr);
+          setRelationship("none");
+        }
+      } else {
+        setRelationship("accepted"); // own profile
+      }
     } catch (error) {
       console.error("Failed to load profile:", error);
       if (error.message.includes('token')) {
@@ -187,9 +220,66 @@ export default function ProfilePage() {
     navigate('/login');
   };
 
+  const handleSendFriendRequest = async () => {
+    if (!id) return;
+    try {
+      setRequestFeedback("");
+      setRequestingFriend(true);
+      await friendshipsAPI.sendFriendRequest(id);
+      setRequestFeedback("Friend request sent");
+      setRelationship("pending_outgoing");
+    } catch (e) {
+      const msg = e?.message || "Failed to send request";
+      setRequestFeedback(msg);
+    } finally {
+      setRequestingFriend(false);
+    }
+  };
 
+  const handleAcceptFriendRequest = async () => {
+    if (!id) return;
+    try {
+      setActionLoading(true);
+      setRequestFeedback("");
+      await friendshipsAPI.acceptFriendRequest(id);
+      setRelationship("accepted");
+      setRequestFeedback("Friend request accepted");
+    } catch (e) {
+      setRequestFeedback(e?.message || "Failed to accept request");
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
+  const handleRejectFriendRequest = async () => {
+    if (!id) return;
+    try {
+      setActionLoading(true);
+      setRequestFeedback("");
+      await friendshipsAPI.rejectFriendRequest(id);
+      setRelationship("none");
+      setRequestFeedback("Friend request rejected");
+    } catch (e) {
+      setRequestFeedback(e?.message || "Failed to reject request");
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
+  const handleUnfriend = async () => {
+    if (!id) return;
+    try {
+      setActionLoading(true);
+      setRequestFeedback("");
+      await friendshipsAPI.unfriend(id);
+      setRelationship("none");
+      setRequestFeedback("Unfriended");
+    } catch (e) {
+      setRequestFeedback(e?.message || "Failed to unfriend");
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const handleAddSkill = async () => {
     if (!newSkill.trim()) return;
@@ -428,7 +518,7 @@ export default function ProfilePage() {
                   )}
                   <p className="text-gray-500 dark:text-gray-400">@{profile.username}</p>
                 </div>
-                {isOwnProfile && (
+                {isOwnProfile ? (
                   <button
                     onClick={isEditing ? handleSaveProfile : () => setIsEditing(true)}
                     className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition cursor-pointer"
@@ -436,8 +526,72 @@ export default function ProfilePage() {
                     <Edit size={18} />
                     {isEditing ? "Save Profile" : "Edit Profile"}
                   </button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    {relationship === "none" && (
+                      <button
+                        onClick={handleSendFriendRequest}
+                        disabled={requestingFriend}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Users size={18} />
+                        {requestingFriend ? "Sending..." : "Add Friend"}
+                      </button>
+                    )}
+
+                    {relationship === "pending_outgoing" && (
+                      <button
+                        disabled
+                        className="flex items-center gap-2 px-4 py-2 bg-gray-300 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg cursor-not-allowed"
+                      >
+                        Pending
+                      </button>
+                    )}
+
+                    {relationship === "pending_incoming" && (
+                      <>
+                        <button
+                          onClick={handleAcceptFriendRequest}
+                          disabled={actionLoading}
+                          className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Accept
+                        </button>
+                        <button
+                          onClick={handleRejectFriendRequest}
+                          disabled={actionLoading}
+                          className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Reject
+                        </button>
+                      </>
+                    )}
+
+                    {relationship === "accepted" && (
+                      <>
+                        <button
+                          onClick={() => navigate(`/chat?with=${encodeURIComponent(id)}`)}
+                          className="flex items-center gap-2 px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 rounded-lg transition cursor-pointer"
+                        >
+                          <MessageCircle size={18} />
+                          Message
+                        </button>
+                        <button
+                          onClick={handleUnfriend}
+                          disabled={actionLoading}
+                          className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Unfriend
+                        </button>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
+
+                {requestFeedback && !isOwnProfile && (
+                  <div className="mb-4 text-sm text-emerald-600 dark:text-emerald-400">{requestFeedback}</div>
+                )}
 
               {/* Bio */}
               {isEditing ? (

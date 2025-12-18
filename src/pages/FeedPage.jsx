@@ -10,6 +10,7 @@ export default function FeedPage() {
   const [posts, setPosts] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [friendSuggestions, setFriendSuggestions] = useState([]);
+  const [myFriends, setMyFriends] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [likeLoadingId, setLikeLoadingId] = useState(null);
@@ -39,9 +40,10 @@ export default function FeedPage() {
     const fetchData = async () => {
       setLoading(true);
       setError("");
+      let userProfile;
       try {
         // Fetch current user profile first (auth gate)
-        const userProfile = await getCurrentUserProfile();
+        userProfile = await getCurrentUserProfile();
         setCurrentUser(userProfile);
 
         // Fetch posts feed (critical)
@@ -74,6 +76,23 @@ export default function FeedPage() {
       } catch (e) {
         console.error("Friend suggestions failed (non-blocking)", e?.message || e, e);
         setFriendSuggestions([]);
+      }
+
+      // Fetch accepted friendships (My Friends)
+      try {
+        const connectionsRes = await friendshipsAPI.getMyFriendships();
+        const connections = Array.isArray(connectionsRes?.connections)
+          ? connectionsRes.connections.map(c => ({
+              id: c.user?.id,
+              username: c.user?.username,
+              full_name: c.user?.full_name,
+              avatar_url: c.user?.avatar_url,
+            }))
+          : [];
+        setMyFriends(connections);
+      } catch (e) {
+        console.error("My friends fetch failed (non-blocking)", e?.message || e);
+        setMyFriends([]);
       }
 
       try {
@@ -430,10 +449,14 @@ export default function FeedPage() {
                     <div className="flex items-center gap-4">
                       <img
                         src={post.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(post.full_name || post.username)}&background=10b981&color=fff`}
-                        className="w-12 h-12 rounded-full border border-gray-300 dark:border-gray-700 object-cover"
+                        className="w-12 h-12 rounded-full border border-gray-300 dark:border-gray-700 object-cover cursor-pointer"
                         alt={post.full_name || post.username}
+                        onClick={() => navigate(`/profile/${encodeURIComponent(post.user_id)}`)}
                       />
-                      <div>
+                      <div
+                        className="cursor-pointer"
+                        onClick={() => navigate(`/profile/${encodeURIComponent(post.user_id)}`)}
+                      >
                         <h3 className="font-semibold">{post.full_name || post.username}</h3>
                         <span className="text-sm text-gray-500 dark:text-gray-400">@{post.username}</span>
                       </div>
@@ -569,38 +592,77 @@ export default function FeedPage() {
         </main>
 
         {/* RIGHT SIDEBAR */}
-        <aside className="fixed top-16 right-0 h-[calc(100vh-4rem)] w-80 bg-white dark:bg-gray-950 border-l border-gray-200 dark:border-gray-900 p-4 flex flex-col">
-          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Friend Suggestions</h3>
-          
-          <div className="space-y-3 overflow-y-auto">
-            {loading ? (
-              <p className="text-center text-gray-500 dark:text-gray-400">Loading...</p>
-            ) : friendSuggestions.length === 0 ? (
-              <p className="text-center text-gray-500 dark:text-gray-400">No suggestions yet</p>
-            ) : (
-              friendSuggestions.map((profile) => (
-                <div key={profile.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">
-                  <div className="flex items-center gap-3 flex-1">
-                    <img
-                      src={profile.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.full_name || profile.username)}&background=10b981&color=fff`}
-                      className="w-10 h-10 rounded-full border border-emerald-500 object-cover"
-                      alt={profile.full_name || profile.username}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
-                        {profile.full_name || profile.username}
-                      </h4>
-                      <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
-                        @{profile.username}
-                      </p>
+        <aside className="fixed top-16 right-0 h-[calc(100vh-4rem)] w-80 bg-white dark:bg-gray-950 border-l border-gray-200 dark:border-gray-900 p-4 flex flex-col gap-6">
+          {/* My Friends */}
+          <div>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-3">My Friends</h3>
+            <div className="space-y-3 max-h-[40vh] overflow-y-auto">
+              {loading ? (
+                <p className="text-center text-gray-500 dark:text-gray-400">Loading...</p>
+              ) : myFriends.length === 0 ? (
+                <p className="text-center text-gray-500 dark:text-gray-400">No friends yet</p>
+              ) : (
+                myFriends.map((f) => (
+                  <div key={f.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                    <div className="flex items-center gap-3 flex-1">
+                      <img
+                        src={f.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(f.full_name || f.username || "Friend")}&background=10b981&color=fff`}
+                        className="w-9 h-9 rounded-full border border-emerald-500 object-cover"
+                        alt={f.full_name || f.username || "Friend"}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                          {f.full_name || f.username}
+                        </h4>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 truncate">@{f.username}</p>
+                      </div>
                     </div>
+                    <button
+                      onClick={() => navigate(`/chat?with=${encodeURIComponent(f.id)}`)}
+                      className="p-1.5 rounded-full hover:bg-emerald-500/20 text-emerald-500 transition cursor-pointer shrink-0"
+                      aria-label="Message"
+                    >
+                      <MessageCircle size={18} />
+                    </button>
                   </div>
-                  <button onClick={() => sendRequest(profile.id)} className="p-1.5 rounded-full hover:bg-emerald-500/20 text-emerald-500 transition cursor-pointer shrink-0">
-                    <Plus size={18} />
-                  </button>
-                </div>
-              ))
-            )}
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Friend Suggestions */}
+          <div>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-3">Friend Suggestions</h3>
+            <div className="space-y-3 max-h-[40vh] overflow-y-auto">
+              {loading ? (
+                <p className="text-center text-gray-500 dark:text-gray-400">Loading...</p>
+              ) : friendSuggestions.length === 0 ? (
+                <p className="text-center text-gray-500 dark:text-gray-400">No suggestions yet</p>
+              ) : (
+                friendSuggestions.map((profile) => (
+                  <div key={profile.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                    <div className="flex items-center gap-3 flex-1">
+                      <img
+                        src={profile.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.full_name || profile.username)}&background=10b981&color=fff`}
+                        className="w-10 h-10 rounded-full border border-emerald-500 object-cover"
+                        alt={profile.full_name || profile.username}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                          {profile.full_name || profile.username}
+                        </h4>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
+                          @{profile.username}
+                        </p>
+                      </div>
+                    </div>
+                    <button onClick={() => sendRequest(profile.id)} className="p-1.5 rounded-full hover:bg-emerald-500/20 text-emerald-500 transition cursor-pointer shrink-0">
+                      <Plus size={18} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </aside>
       </div>
