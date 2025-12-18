@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Menu, Search, Users, LogOut, Heart, MessageCircle, Share2, Plus, Mail, Bell, Home, X, Eye } from "lucide-react";
-import { getCurrentUserProfile, isAuthenticated, postAPI, friendshipsAPI, notificationsAPI, searchAPI, getAllUsers } from "../services/api";
+import { getCurrentUserProfile, isAuthenticated, postAPI, friendshipsAPI, notificationsAPI, searchAPI } from "../services/api";
 
 export default function FeedPage() {
   const navigate = useNavigate();
@@ -36,6 +36,12 @@ export default function FeedPage() {
     }
   }, [navigate]);
 
+  const filteredSuggestions = useMemo(() => {
+    const excludedIds = new Set(myFriends.map((f) => f.id));
+    if (currentUser?.id) excludedIds.add(currentUser.id);
+    return friendSuggestions.filter((profile) => profile?.id && !excludedIds.has(profile.id));
+  }, [friendSuggestions, myFriends, currentUser?.id]);
+
   // Fetch current user, posts feed, and friend suggestions
   useEffect(() => {
     const fetchData = async () => {
@@ -60,20 +66,10 @@ export default function FeedPage() {
         return;
       }
 
-      // Non-critical: friend suggestions and notifications
+      // Non-critical: friend suggestions (already filtered server-side to exclude existing relationships)
       try {
-        console.log("Fetching all users for friend suggestions...");
-        const allUsers = await getAllUsers();
-        console.log("All users received:", allUsers);
-        // Filter out current user and show other real users
-        const usersArray = Array.isArray(allUsers) ? allUsers : [];
-        let otherUsers = usersArray.filter(user => user.id !== userProfile.id).slice(0, 8);
-        // Fallback: if filtering removed everyone (e.g., single-user DB), show first few users
-        if (otherUsers.length === 0 && usersArray.length > 0) {
-          otherUsers = usersArray.slice(0, 8);
-        }
-        console.log("Filtered other users:", otherUsers);
-        setFriendSuggestions(otherUsers);
+        const suggestionsRes = await friendshipsAPI.getSuggestions(8, 0);
+        setFriendSuggestions(suggestionsRes?.suggestions || []);
       } catch (e) {
         console.error("Friend suggestions failed (non-blocking)", e?.message || e, e);
         setFriendSuggestions([]);
@@ -259,33 +255,63 @@ export default function FeedPage() {
       setFriendSuggestions(suggestions?.suggestions || []);
     } catch (e) {
       console.error("sendRequest error:", e);
+      setError(e?.message || "Failed to send friend request");
+      // Refresh suggestions in case backend already has a pending row
+      try {
+        const suggestions = await friendshipsAPI.getSuggestions(8, 0);
+        setFriendSuggestions(suggestions?.suggestions || []);
+      } catch (_) {
+        /* swallow secondary error */
+      }
     }
+  };
+
+  const refreshFriendsAndSuggestions = async () => {
+    const connections = await friendshipsAPI.getConnections();
+    const friends = Array.isArray(connections?.connections)
+      ? connections.connections.map((c) => ({
+          id: c.user.id,
+          username: c.user.username,
+          full_name: c.user.full_name,
+          avatar_url: c.user.avatar_url,
+        }))
+      : [];
+    setMyFriends(friends);
+    const suggestions = await friendshipsAPI.getSuggestions(8, 0);
+    setFriendSuggestions(suggestions?.suggestions || []);
   };
 
   const acceptFriendRequest = async (otherUserId) => {
     try {
+      const status = await friendshipsAPI.getFriendshipStatus(otherUserId);
+      if (status?.status === "accepted") {
+        const incoming = await friendshipsAPI.getIncomingRequests();
+        setIncomingRequests(incoming?.requests || []);
+        await refreshFriendsAndSuggestions();
+        const notifs = await notificationsAPI.getNotifications();
+        setNotifications(Array.isArray(notifs) ? notifs : []);
+        return;
+      }
+
       await friendshipsAPI.acceptFriendRequest(otherUserId);
-      // Refresh incoming requests and friends list
+
       const incoming = await friendshipsAPI.getIncomingRequests();
       setIncomingRequests(incoming?.requests || []);
-      const connections = await friendshipsAPI.getConnections();
-      const friends = Array.isArray(connections?.connections)
-        ? connections.connections.map((c) => ({
-            id: c.user.id,
-            username: c.user.username,
-            full_name: c.user.full_name,
-            avatar_url: c.user.avatar_url,
-          }))
-        : [];
-      setMyFriends(friends);
-      // Refresh friend suggestions (accepted friend will be filtered out)
-      const suggestions = await friendshipsAPI.getSuggestions(8, 0);
-      setFriendSuggestions(suggestions?.suggestions || []);
-      // Refresh notifications
+      await refreshFriendsAndSuggestions();
       const notifs = await notificationsAPI.getNotifications();
       setNotifications(Array.isArray(notifs) ? notifs : []);
     } catch (e) {
       console.error("Accept request error:", e);
+      // For 409/not-pending, refresh lists to drop stale UI entries
+      try {
+        const incoming = await friendshipsAPI.getIncomingRequests();
+        setIncomingRequests(incoming?.requests || []);
+        await refreshFriendsAndSuggestions();
+        const notifs = await notificationsAPI.getNotifications();
+        setNotifications(Array.isArray(notifs) ? notifs : []);
+      } catch (_) {
+        /* swallow refresh error */
+      }
     }
   };
 
@@ -744,10 +770,10 @@ export default function FeedPage() {
             <div className="space-y-3 max-h-[40vh] overflow-y-auto">
               {loading ? (
                 <p className="text-center text-gray-500 dark:text-gray-400">Loading...</p>
-              ) : friendSuggestions.length === 0 ? (
+              ) : filteredSuggestions.length === 0 ? (
                 <p className="text-center text-gray-500 dark:text-gray-400">No suggestions yet</p>
               ) : (
-                friendSuggestions.map((profile) => (
+                filteredSuggestions.map((profile) => (
                   <div key={profile.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">
                     <div className="flex items-center gap-3 flex-1">
                       <img
