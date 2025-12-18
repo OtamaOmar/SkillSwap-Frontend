@@ -223,20 +223,29 @@ export const userAPI = {
   },
 
   uploadProfilePicture: async (file) => {
-    const formData = new FormData();
-    formData.append("profile_picture", file);
-    const response = await axiosInstance.post(`${API_URL}/users/upload/profile-picture`, formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
+    // For now, using a placeholder URL. In production, upload to cloud storage first.
+    const avatar_url = typeof file === 'string' ? file : URL.createObjectURL(file);
+    const response = await axiosInstance.post(`${API_URL}/users/upload/profile-picture`, { avatar_url });
     return response.data;
   },
 
   uploadCoverImage: async (file) => {
-    const formData = new FormData();
-    formData.append("cover_image", file);
-    const response = await axiosInstance.post(`${API_URL}/users/upload/cover-image`, formData, {
-      headers: { "Content-Type": "multipart/form-data" },
+    // For now, using a placeholder URL. In production, upload to cloud storage first.
+    const cover_image_url = typeof file === 'string' ? file : URL.createObjectURL(file);
+    const response = await axiosInstance.post(`${API_URL}/users/upload/cover-image`, { cover_image_url });
+    return response.data;
+  },
+
+  addSkill: async (skillName, skillType) => {
+    const response = await axiosInstance.post(`${API_URL}/users/skills`, {
+      skill_name: skillName,
+      skill_type: skillType,
     });
+    return response.data;
+  },
+
+  deleteSkill: async (skillId) => {
+    const response = await axiosInstance.delete(`${API_URL}/users/skills/${skillId}`);
     return response.data;
   },
 };

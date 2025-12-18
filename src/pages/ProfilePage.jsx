@@ -166,11 +166,8 @@ export default function ProfilePage() {
     try {
       setUploadingImage(true);
       const result = await userAPI.uploadProfilePicture(file);
-      setProfile(result.user);
-      // Update localStorage
-      const savedUser = JSON.parse(localStorage.getItem('user') || '{}');
-      savedUser.profile_picture = result.user.profile_picture;
-      localStorage.setItem('user', JSON.stringify(savedUser));
+      // Reload profile to reflect the updated avatar
+      await loadProfile();
     } catch (error) {
       console.error("Failed to upload image:", error);
       alert("Failed to upload profile picture");
@@ -205,7 +202,8 @@ export default function ProfilePage() {
     try {
       setUploadingCover(true);
       const result = await userAPI.uploadCoverImage(file);
-      setProfile(result.user);
+      // Reload profile to reflect the updated cover
+      await loadProfile();
     } catch (error) {
       console.error("Failed to upload cover:", error);
       alert("Failed to upload cover image");
@@ -368,12 +366,23 @@ export default function ProfilePage() {
 
         {/* PROFILE + MENU */}
         <div className="relative flex items-center gap-4">
-          <img
-            src={profile?.profile_picture ? `http://localhost:4000${profile.profile_picture}` : "https://i.pravatar.cc/40"}
-            alt="Profile"
-            className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 object-cover"
-            onClick={() => setSettingsOpen(!settingsOpen)}
-          />
+          {profile?.avatar_url ? (
+            <img
+              src={profile.avatar_url}
+              alt="Profile"
+              className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 object-cover"
+              onClick={() => setSettingsOpen(!settingsOpen)}
+            />
+          ) : (
+            <div
+              className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 bg-gray-300 dark:bg-gray-700 flex items-center justify-center"
+              onClick={() => setSettingsOpen(!settingsOpen)}
+            >
+              <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
+                {(profile?.full_name || 'U').charAt(0).toUpperCase()}
+              </span>
+            </div>
+          )}
 
           {/* Dropdown */}
           <div
@@ -437,12 +446,12 @@ export default function ProfilePage() {
           <div className="max-w-4xl mx-auto">
             {/* Cover Image */}
             <div 
-              className="relative h-48 bg-linear-to-r from-emerald-500 to-teal-600 rounded-xl mb-20 overflow-hidden"
-              style={{
-                backgroundImage: profile.cover_image ? `url(http://localhost:4000${profile.cover_image})` : undefined,
+              className="relative h-48 rounded-xl mb-20 overflow-visible bg-gray-200 dark:bg-gray-800"
+              style={profile.cover_image_url ? {
+                backgroundImage: `url(${profile.cover_image_url})`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center'
-              }}
+              } : {}}
             >
               {isOwnProfile && (
                 <>
@@ -470,11 +479,19 @@ export default function ProfilePage() {
               {/* Profile Picture */}
               <div className="absolute -bottom-16 left-8">
                 <div className="relative">
-                  <img
-                    src={profile.profile_picture ? `http://localhost:4000${profile.profile_picture}` : "https://i.pravatar.cc/150"}
-                    alt="Profile"
-                    className="w-32 h-32 rounded-full border-4 border-white dark:border-gray-900 object-cover"
-                  />
+                  {profile.avatar_url ? (
+                    <img
+                      src={profile.avatar_url}
+                      alt="Profile"
+                      className="w-32 h-32 rounded-full border-4 border-white dark:border-gray-900 object-cover"
+                    />
+                  ) : (
+                    <div className="w-32 h-32 rounded-full border-4 border-white dark:border-gray-900 bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                      <span className="text-4xl font-bold text-gray-600 dark:text-gray-400">
+                        {(profile.full_name || profile.username || 'U').charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                  )}
                   {isOwnProfile && (
                     <>
                       <input
@@ -635,12 +652,8 @@ export default function ProfilePage() {
                   <p className="text-sm text-gray-500 dark:text-gray-400">Posts</p>
                 </div>
                 <div className="text-center cursor-pointer hover:opacity-80 transition">
-                  <p className="text-2xl font-bold text-emerald-600">{profile.stats?.followers || 0}</p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Followers</p>
-                </div>
-                <div className="text-center cursor-pointer hover:opacity-80 transition">
-                  <p className="text-2xl font-bold text-emerald-600">{profile.stats?.following || 0}</p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Following</p>
+                  <p className="text-2xl font-bold text-emerald-600">{profile.stats?.friends || 0}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Friends</p>
                 </div>
               </div>
 
@@ -741,11 +754,19 @@ export default function ProfilePage() {
                         className="p-6 bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700"
                       >
                         <div className="flex items-center gap-4 mb-3">
-                          <img
-                            src={post.profile_picture ? `http://localhost:4000${post.profile_picture}` : "https://i.pravatar.cc/40"}
-                            className="w-10 h-10 rounded-full border border-gray-300 dark:border-gray-700 object-cover"
-                            alt={post.username}
-                          />
+                          {post.avatar_url ? (
+                            <img
+                              src={post.avatar_url}
+                              className="w-10 h-10 rounded-full border border-gray-300 dark:border-gray-700 object-cover"
+                              alt={post.username}
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full border border-gray-300 dark:border-gray-700 bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                              <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
+                                {(post.full_name || post.username || 'U').charAt(0).toUpperCase()}
+                              </span>
+                            </div>
+                          )}
                           <div>
                             <h4 className="font-semibold">{post.full_name || post.username}</h4>
                             <span className="text-sm text-gray-500 dark:text-gray-400">

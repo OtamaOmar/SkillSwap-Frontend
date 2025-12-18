@@ -429,12 +429,23 @@ export default function FeedPage() {
             )}
           </div>
           
-          <img
-            src={currentUser?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser?.full_name || currentUser?.username || 'User')}&background=10b981&color=fff`}
-            alt="Profile"
-            className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 object-cover"
-            onClick={() => navigate("/profile")}
-          />
+          {currentUser?.avatar_url ? (
+            <img
+              src={currentUser.avatar_url}
+              alt="Profile"
+              className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 object-cover"
+              onClick={() => navigate("/profile")}
+            />
+          ) : (
+            <div 
+              onClick={() => navigate("/profile")}
+              className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 bg-gray-300 dark:bg-gray-700 flex items-center justify-center"
+            >
+              <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
+                {(currentUser?.full_name || currentUser?.username || 'U').charAt(0).toUpperCase()}
+              </span>
+            </div>
+          )}
         </div>
       </header>
 
@@ -539,12 +550,23 @@ export default function FeedPage() {
                   {/* HEADER */}
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-4">
-                      <img
-                        src={post.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(post.full_name || post.username)}&background=10b981&color=fff`}
-                        className="w-12 h-12 rounded-full border border-gray-300 dark:border-gray-700 object-cover cursor-pointer"
-                        alt={post.full_name || post.username}
-                        onClick={() => navigate(`/profile/${encodeURIComponent(post.user_id)}`)}
-                      />
+                      {post.avatar_url ? (
+                        <img
+                          src={post.avatar_url}
+                          className="w-12 h-12 rounded-full border border-gray-300 dark:border-gray-700 object-cover cursor-pointer"
+                          alt={post.full_name || post.username}
+                          onClick={() => navigate(`/profile/${encodeURIComponent(post.user_id)}`)}
+                        />
+                      ) : (
+                        <div 
+                          onClick={() => navigate(`/profile/${encodeURIComponent(post.user_id)}`)}
+                          className="w-12 h-12 rounded-full border border-gray-300 dark:border-gray-700 bg-gray-300 dark:bg-gray-700 flex items-center justify-center cursor-pointer"
+                        >
+                          <span className="text-lg font-bold text-gray-600 dark:text-gray-400">
+                            {(post.full_name || post.username || 'U').charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
                       <div
                         className="cursor-pointer"
                         onClick={() => navigate(`/profile/${encodeURIComponent(post.user_id)}`)}
@@ -619,11 +641,19 @@ export default function FeedPage() {
                         {post.comments.map(comment => (
                           <div key={comment.id} className="text-sm">
                             <div className="flex gap-2">
-                              <img 
-                                src={comment.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(comment.username)}&background=10b981&color=fff`}
-                                alt={comment.username}
-                                className="w-6 h-6 rounded-full"
-                              />
+                              {comment.avatar_url ? (
+                                <img 
+                                  src={comment.avatar_url}
+                                  alt={comment.username}
+                                  className="w-6 h-6 rounded-full"
+                                />
+                              ) : (
+                                <div className="w-6 h-6 rounded-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                                  <span className="text-xs font-bold text-gray-600 dark:text-gray-400">
+                                    {(comment.username || 'U').charAt(0).toUpperCase()}
+                                  </span>
+                                </div>
+                              )}
                               <div className="flex-1">
                                 <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{comment.username}</p>
                                 <p className="text-gray-700 dark:text-gray-300">{comment.content}</p>
@@ -697,11 +727,19 @@ export default function FeedPage() {
                 myFriends.map((f) => (
                   <div key={f.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">
                     <div className="flex items-center gap-3 flex-1">
-                      <img
-                        src={f.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(f.full_name || f.username || "Friend")}&background=10b981&color=fff`}
-                        className="w-9 h-9 rounded-full border border-emerald-500 object-cover"
-                        alt={f.full_name || f.username || "Friend"}
-                      />
+                      {f.avatar_url ? (
+                        <img
+                          src={f.avatar_url}
+                          className="w-9 h-9 rounded-full border border-emerald-500 object-cover"
+                          alt={f.full_name || f.username || "Friend"}
+                        />
+                      ) : (
+                        <div className="w-9 h-9 rounded-full border border-emerald-500 bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                          <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
+                            {(f.full_name || f.username || 'F').charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex-1 min-w-0">
                         <h4 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
                           {f.full_name || f.username}
@@ -730,11 +768,19 @@ export default function FeedPage() {
                 {incomingRequests.map((request) => (
                   <div key={request.requester_id} className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800">
                     <div className="flex items-center gap-3 mb-2">
-                      <img
-                        src={request.requester_avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(request.requester_full_name || request.requester_username)}&background=10b981&color=fff`}
-                        className="w-10 h-10 rounded-full border border-emerald-500 object-cover"
-                        alt={request.requester_full_name || request.requester_username}
-                      />
+                      {request.requester_avatar_url ? (
+                        <img
+                          src={request.requester_avatar_url}
+                          className="w-10 h-10 rounded-full border border-emerald-500 object-cover"
+                          alt={request.requester_full_name || request.requester_username}
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full border border-emerald-500 bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                          <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
+                            {(request.requester_full_name || request.requester_username || 'U').charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex-1 min-w-0">
                         <h4 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
                           {request.requester_full_name || request.requester_username}
@@ -776,11 +822,19 @@ export default function FeedPage() {
                 filteredSuggestions.map((profile) => (
                   <div key={profile.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">
                     <div className="flex items-center gap-3 flex-1">
-                      <img
-                        src={profile.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.full_name || profile.username)}&background=10b981&color=fff`}
-                        className="w-10 h-10 rounded-full border border-emerald-500 object-cover"
-                        alt={profile.full_name || profile.username}
-                      />
+                      {profile.avatar_url ? (
+                        <img
+                          src={profile.avatar_url}
+                          className="w-10 h-10 rounded-full border border-emerald-500 object-cover"
+                          alt={profile.full_name || profile.username}
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full border border-emerald-500 bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                          <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
+                            {(profile.full_name || profile.username || 'U').charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex-1 min-w-0">
                         <h4 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
                           {profile.full_name || profile.username}

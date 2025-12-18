@@ -183,12 +183,12 @@ export default function ChatPage() {
 
         {/* PROFILE + MENU */}
         <div className="relative flex items-center gap-4">
-          <img
-            src="https://i.pravatar.cc/40"
-            alt="Profile"
-            className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700"
+          <div
+            className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 bg-gray-300 dark:bg-gray-700 flex items-center justify-center"
             onClick={() => setSettingsOpen(!settingsOpen)}
-          />
+          >
+            <span className="text-sm font-bold text-gray-600 dark:text-gray-400">U</span>
+          </div>
 
           {/* Dropdown */}
           <div
@@ -267,11 +267,19 @@ export default function ChatPage() {
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <img
-                        src={chat.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(chat.full_name || chat.username)}&background=10b981&color=fff`}
-                        alt={chat.username}
-                        className="w-12 h-12 rounded-full"
-                      />
+                      {chat.avatar_url ? (
+                        <img
+                          src={chat.avatar_url}
+                          alt={chat.username}
+                          className="w-12 h-12 rounded-full"
+                        />
+                      ) : (
+                        <div className="w-12 h-12 rounded-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                          <span className="text-lg font-bold text-gray-600 dark:text-gray-400">
+                            {(chat.full_name || chat.username || 'U').charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-1">
                           <h3 className="font-semibold text-sm text-white">{chat.full_name || chat.username}</h3>
@@ -300,11 +308,19 @@ export default function ChatPage() {
                 const selectedChatData = chats.find(c => c.user_id === selectedChat) || friendsMap[selectedChat];
                 return selectedChatData ? (
                   <div className="h-16 bg-emerald-700 dark:bg-gray-800 border-b border-gray-700 dark:border-gray-700 px-6 flex items-center gap-4">
-                    <img
-                      src={selectedChatData.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedChatData.full_name || selectedChatData.username)}&background=10b981&color=fff`}
-                      alt={selectedChatData.username}
-                      className="w-10 h-10 rounded-full"
-                    />
+                    {selectedChatData.avatar_url ? (
+                      <img
+                        src={selectedChatData.avatar_url}
+                        alt={selectedChatData.username}
+                        className="w-10 h-10 rounded-full"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                        <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
+                          {(selectedChatData.full_name || selectedChatData.username || 'U').charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                    )}
                     <div>
                       <h3 className="font-semibold text-white">{selectedChatData.full_name || selectedChatData.username}</h3>
                       <span className="text-xs text-gray-400">Active now</span>
