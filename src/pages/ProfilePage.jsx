@@ -9,7 +9,6 @@ export default function ProfilePage() {
   const { id } = useParams(); // Get user ID from URL if viewing another user's profile
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode] = useState(localStorage.getItem("theme") === "dark");
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
@@ -214,7 +213,7 @@ export default function ProfilePage() {
 
     try {
       setUploadingImage(true);
-      const result = await userAPI.uploadProfilePicture(file);
+      await userAPI.uploadProfilePicture(file);
       // Reload profile to reflect the updated avatar
       await loadProfile();
     } catch (error) {
@@ -250,7 +249,7 @@ export default function ProfilePage() {
 
     try {
       setUploadingCover(true);
-      const result = await userAPI.uploadCoverImage(file);
+      await userAPI.uploadCoverImage(file);
       // Reload profile to reflect the updated cover
       await loadProfile();
     } catch (error) {

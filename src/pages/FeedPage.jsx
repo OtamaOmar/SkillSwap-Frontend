@@ -18,7 +18,6 @@ export default function FeedPage() {
   const [commentPostId, setCommentPostId] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -158,7 +157,7 @@ export default function FeedPage() {
     if (isAuthenticated()) {
       fetchData();
     }
-  }, [navigate]);
+  }, [navigate, pendingRequests]);
 
   // DARK MODE
   useEffect(() => {
@@ -366,7 +365,7 @@ export default function FeedPage() {
         await refreshFriendsAndSuggestions();
         const notifs = await notificationsAPI.getNotifications();
         setNotifications(Array.isArray(notifs) ? notifs : []);
-      } catch (_) {
+      } catch {
         /* swallow refresh error */
       }
     }
