@@ -22,14 +22,12 @@ jobs:
       with:
         node-version: '18'
         cache: 'npm'
-        cache-dependency-path: 'SkillSwap-Frontend/package-lock.json'
+        cache-dependency-path: 'package-lock.json'
 
     - name: Install dependencies
-      working-directory: ./SkillSwap-Frontend
       run: npm ci
 
     - name: Build
-      working-directory: ./SkillSwap-Frontend
       run: npm run build
       env:
         CI: true
@@ -38,7 +36,7 @@ jobs:
     - name: Deploy to Netlify
       uses: nwtgck/actions-netlify@v2.1
       with:
-        publish-dir: './SkillSwap-Frontend/dist'
+        publish-dir: './dist'
         production-branch: main
         github-token: ${{ secrets.GITHUB_TOKEN }}
         deploy-message: 'Deploy from GitHub Actions'
@@ -53,14 +51,13 @@ jobs:
       run: |
         npm install -g vercel
         vercel --prod --token=${{ secrets.VERCEL_TOKEN }}
-      working-directory: ./SkillSwap-Frontend
       if: ${{ secrets.VERCEL_TOKEN != '' }}
 
     - name: Deploy to GitHub Pages (Alternative)
       uses: peaceiris/actions-gh-pages@v3
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./SkillSwap-Frontend/dist
+        publish_dir: ./dist
       if: ${{ github.ref == 'refs/heads/main' && secrets.NETLIFY_AUTH_TOKEN == '' && secrets.VERCEL_TOKEN == '' }}
 
     - name: Run smoke tests

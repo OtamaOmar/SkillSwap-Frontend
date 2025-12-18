@@ -3,13 +3,8 @@ name: Frontend CI/CD
 on:
   push:
     branches: [ main, dev ]
-    paths:
-      - 'SkillSwap-Frontend/**'
-      - '.github/workflows/frontend-ci.yml'
   pull_request:
     branches: [ main, dev ]
-    paths:
-      - 'SkillSwap-Frontend/**'
 
 jobs:
   build-and-test:
@@ -28,21 +23,17 @@ jobs:
         cache-dependency-path: 'SkillSwap-Frontend/package-lock.json'
 
     - name: Install dependencies
-      working-directory: ./SkillSwap-Frontend
       run: npm ci
 
     - name: Lint
-      working-directory: ./SkillSwap-Frontend
       run: npm run lint
 
     - name: Build
-      working-directory: ./SkillSwap-Frontend
       run: npm run build
       env:
         CI: true
 
     - name: Run tests
-      working-directory: ./SkillSwap-Frontend
       run: npm test --if-present
       env:
         CI: true
