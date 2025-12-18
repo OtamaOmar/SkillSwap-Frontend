@@ -27,6 +27,7 @@ export default function FeedPage() {
   const [expandedPostId, setExpandedPostId] = useState(null);
   const [newPostContent, setNewPostContent] = useState("");
   const [newPostImageUrl, setNewPostImageUrl] = useState("");
+  const [incomingRequests, setIncomingRequests] = useState([]);
 
   // Authentication guard - redirect if not logged in
   useEffect(() => {
@@ -104,6 +105,14 @@ export default function FeedPage() {
         console.warn("Notifications fetch failed (non-blocking)", e?.message || e);
         setNotifications([]);
         setUnreadCount(0);
+      }
+
+      try {
+        const incoming = await friendshipsAPI.getIncomingRequests();
+        setIncomingRequests(incoming?.requests || []);
+      } catch (e) {
+        console.warn("Incoming requests fetch failed (non-blocking)", e?.message || e);
+        setIncomingRequests([]);
       } finally {
         setLoading(false);
       }
@@ -253,6 +262,47 @@ export default function FeedPage() {
     }
   };
 
+  const acceptFriendRequest = async (otherUserId) => {
+    try {
+      await friendshipsAPI.acceptFriendRequest(otherUserId);
+      // Refresh incoming requests and friends list
+      const incoming = await friendshipsAPI.getIncomingRequests();
+      setIncomingRequests(incoming?.requests || []);
+      const connections = await friendshipsAPI.getConnections();
+      const friends = Array.isArray(connections?.connections)
+        ? connections.connections.map((c) => ({
+            id: c.user.id,
+            username: c.user.username,
+            full_name: c.user.full_name,
+            avatar_url: c.user.avatar_url,
+          }))
+        : [];
+      setMyFriends(friends);
+      // Refresh friend suggestions (accepted friend will be filtered out)
+      const suggestions = await friendshipsAPI.getSuggestions(8, 0);
+      setFriendSuggestions(suggestions?.suggestions || []);
+      // Refresh notifications
+      const notifs = await notificationsAPI.getNotifications();
+      setNotifications(Array.isArray(notifs) ? notifs : []);
+    } catch (e) {
+      console.error("Accept request error:", e);
+    }
+  };
+
+  const rejectFriendRequest = async (otherUserId) => {
+    try {
+      await friendshipsAPI.rejectFriendRequest(otherUserId);
+      // Refresh incoming requests
+      const incoming = await friendshipsAPI.getIncomingRequests();
+      setIncomingRequests(incoming?.requests || []);
+      // Refresh notifications
+      const notifs = await notificationsAPI.getNotifications();
+      setNotifications(Array.isArray(notifs) ? notifs : []);
+    } catch (e) {
+      console.error("Reject request error:", e);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-gray-900 text-black dark:text-white">
 
@@ -309,7 +359,7 @@ export default function FeedPage() {
                   <div className="p-4 text-center text-gray-500 dark:text-gray-400">No notifications</div>
                 ) : (
                   notifications.map(notif => (
-                    <div key={notif.id} className={`p-4 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 ${!notif.read_at ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+                    <div key={notif.id} className={`p-4 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 ${!notif.is_read ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
                       <div className="flex justify-between items-start gap-2">
                         <div className="flex-1">
                           <p className="text-sm text-gray-800 dark:text-gray-200">{notif.content}</p>
@@ -322,7 +372,23 @@ export default function FeedPage() {
                           <X size={16} />
                         </button>
                       </div>
-                      {!notif.read_at && (
+                      {notif.notification_type === 'friend_request' && notif.related_friendship_id && (
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={() => acceptFriendRequest(notif.actor_id)}
+                            className="flex-1 px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded text-xs font-medium transition"
+                          >
+                            Accept
+                          </button>
+                          <button
+                            onClick={() => rejectFriendRequest(notif.actor_id)}
+                            className="flex-1 px-3 py-1 bg-gray-300 dark:bg-gray-700 hover:bg-gray-400 dark:hover:bg-gray-600 text-gray-800 dark:text-white rounded text-xs font-medium transition"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
+                      {!notif.is_read && (
                         <button 
                           onClick={() => markNotificationAsRead(notif.id)}
                           className="mt-2 text-xs text-emerald-600 dark:text-emerald-400 hover:underline"
@@ -629,6 +695,48 @@ export default function FeedPage() {
               )}
             </div>
           </div>
+
+          {/* Incoming Friend Requests */}
+          {incomingRequests.length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-3">Friend Requests</h3>
+              <div className="space-y-3">
+                {incomingRequests.map((request) => (
+                  <div key={request.requester_id} className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                    <div className="flex items-center gap-3 mb-2">
+                      <img
+                        src={request.requester_avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(request.requester_full_name || request.requester_username)}&background=10b981&color=fff`}
+                        className="w-10 h-10 rounded-full border border-emerald-500 object-cover"
+                        alt={request.requester_full_name || request.requester_username}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                          {request.requester_full_name || request.requester_username}
+                        </h4>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
+                          @{request.requester_username}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => acceptFriendRequest(request.requester_id)}
+                        className="flex-1 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-md text-sm font-medium transition"
+                      >
+                        Accept
+                      </button>
+                      <button
+                        onClick={() => rejectFriendRequest(request.requester_id)}
+                        className="flex-1 px-3 py-1.5 bg-gray-300 dark:bg-gray-700 hover:bg-gray-400 dark:hover:bg-gray-600 text-gray-800 dark:text-white rounded-md text-sm font-medium transition"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Friend Suggestions */}
           <div>

@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Menu, Search, Users, LogOut, Send, Bell, Mail, ArrowLeft } from "lucide-react";
-import { messagesAPI, getCurrentUserProfile } from "../services/api";
+import { messagesAPI, getCurrentUserProfile, friendshipsAPI } from "../services/api";
 
 export default function ChatPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode] = useState(localStorage.getItem("theme") === "dark");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -16,6 +17,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [friendsMap, setFriendsMap] = useState({});
 
   useEffect(() => {
     if (darkMode) {
@@ -27,11 +29,19 @@ export default function ChatPage() {
     }
   }, [darkMode]);
 
-  // Load conversations on mount
+  // Load conversations on mount and check for URL parameter
   useEffect(() => {
     loadConversations();
     loadCurrentUser();
-  }, []);
+    loadFriendsList();
+
+    // Check if there's a "with" parameter in URL
+    const withUserId = searchParams.get("with");
+    if (withUserId) {
+      setSelectedChat(withUserId);
+      loadChatMessages(withUserId);
+    }
+  }, [searchParams]);
 
   const loadCurrentUser = async () => {
     try {
@@ -42,10 +52,39 @@ export default function ChatPage() {
     }
   };
 
+  const loadFriendsList = async () => {
+    try {
+      const response = await friendshipsAPI.getConnections();
+      const connections = response.connections || [];
+      const friendsMapTemp = {};
+      connections.forEach(conn => {
+        friendsMapTemp[conn.user.id] = {
+          id: conn.user.id,
+          username: conn.user.username,
+          full_name: conn.user.full_name,
+          avatar_url: conn.user.avatar_url,
+        };
+      });
+      setFriendsMap(friendsMapTemp);
+    } catch (err) {
+      console.error("Failed to load friends list:", err);
+    }
+  };
+
   const loadConversations = async () => {
     try {
       setLoading(true);
-      const conversations = await messagesAPI.getAllConversations();
+      const response = await messagesAPI.getAllConversations();
+      // The backend returns { count, conversations } where conversations use 'other_id'
+      const conversations = response.conversations ? response.conversations.map(conv => ({
+        user_id: conv.other_id,
+        username: conv.username,
+        full_name: conv.full_name,
+        avatar_url: conv.avatar_url,
+        last_message: conv.last_message,
+        last_message_time: conv.last_message_time,
+        unread_count: conv.unread_count,
+      })) : [];
       setChats(Array.isArray(conversations) ? conversations : []);
     } catch (err) {
       console.error("Failed to load conversations:", err);
@@ -57,8 +96,17 @@ export default function ChatPage() {
   const loadChatMessages = async (userId) => {
     try {
       setLoading(true);
-      const conversation = await messagesAPI.getConversation(userId);
-      setMessages(Array.isArray(conversation) ? conversation : []);
+      const response = await messagesAPI.getConversation(userId);
+      // Backend returns { limit, offset, count, messages }
+      const msgs = response.messages ? response.messages.map(msg => ({
+        id: msg.id,
+        sender_id: msg.sender_id,
+        receiver_id: msg.receiver_id,
+        content: msg.content,
+        created_at: msg.created_at,
+        read_at: msg.read_at,
+      })) : [];
+      setMessages(Array.isArray(msgs) ? msgs.reverse() : []);
       // Mark all as read
       await messagesAPI.markConversationAsRead(userId);
     } catch (err) {
@@ -86,6 +134,24 @@ export default function ChatPage() {
     } catch (err) {
       console.error("Failed to send message:", err);
     }
+  };
+
+  const getChatDisplayList = () => {
+    const chatsList = [...chats];
+    // If selectedChat is not in the list but is in friendsMap, add it temporarily
+    if (selectedChat && !chats.find(c => c.user_id === selectedChat) && friendsMap[selectedChat]) {
+      const friend = friendsMap[selectedChat];
+      chatsList.unshift({
+        user_id: friend.id,
+        username: friend.username,
+        full_name: friend.full_name,
+        avatar_url: friend.avatar_url,
+        last_message: "New conversation",
+        last_message_time: "now",
+        unread_count: 0,
+      });
+    }
+    return chatsList;
   };
 
   return (
@@ -187,10 +253,10 @@ export default function ChatPage() {
             <div className="space-y-0">
               {loading ? (
                 <div className="p-4 text-center text-gray-400">Loading conversations...</div>
-              ) : chats.length === 0 ? (
+              ) : getChatDisplayList().length === 0 ? (
                 <div className="p-4 text-center text-gray-400">No conversations yet</div>
               ) : (
-                chats.map((chat) => (
+                getChatDisplayList().map((chat) => (
                   <div
                     key={chat.user_id}
                     onClick={() => handleSelectChat(chat)}
@@ -202,13 +268,13 @@ export default function ChatPage() {
                   >
                     <div className="flex items-center gap-3">
                       <img
-                        src={chat.avatar_url || `https://i.pravatar.cc/40?img=${chat.user_id}`}
+                        src={chat.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(chat.full_name || chat.username)}&background=10b981&color=fff`}
                         alt={chat.username}
                         className="w-12 h-12 rounded-full"
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between mb-1">
-                          <h3 className="font-semibold text-sm text-white">{chat.username || chat.full_name}</h3>
+                          <h3 className="font-semibold text-sm text-white">{chat.full_name || chat.username}</h3>
                           <span className="text-xs text-gray-400">{chat.last_message_time || "now"}</span>
                         </div>
                         <div className="flex items-center justify-between">
@@ -227,24 +293,32 @@ export default function ChatPage() {
         <main
           className={`flex-1 flex flex-col transition-all duration-300 ${sidebarOpen ? "ml-160" : "ml-112"} mr-0`}
         >
-          {selectedChat !== null && chats.length > 0 ? (
+          {selectedChat !== null ? (
             <>
               {/* Chat Header */}
               {(() => {
-                const selectedChatData = chats.find(c => c.user_id === selectedChat);
+                const selectedChatData = chats.find(c => c.user_id === selectedChat) || friendsMap[selectedChat];
                 return selectedChatData ? (
-                  <div className="h-16 bg-red-800 dark:bg-gray-800 border-b border-gray-700 dark:border-gray-700 px-6 flex items-center gap-4">
+                  <div className="h-16 bg-emerald-700 dark:bg-gray-800 border-b border-gray-700 dark:border-gray-700 px-6 flex items-center gap-4">
                     <img
-                      src={selectedChatData.avatar_url || `https://i.pravatar.cc/40?img=${selectedChatData.user_id}`}
+                      src={selectedChatData.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(selectedChatData.full_name || selectedChatData.username)}&background=10b981&color=fff`}
                       alt={selectedChatData.username}
                       className="w-10 h-10 rounded-full"
                     />
                     <div>
-                      <h3 className="font-semibold text-white">{selectedChatData.username || selectedChatData.full_name}</h3>
+                      <h3 className="font-semibold text-white">{selectedChatData.full_name || selectedChatData.username}</h3>
                       <span className="text-xs text-gray-400">Active now</span>
                     </div>
                   </div>
-                ) : null;
+                ) : (
+                  <div className="h-16 bg-emerald-700 dark:bg-gray-800 border-b border-gray-700 dark:border-gray-700 px-6 flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-gray-600"></div>
+                    <div>
+                      <h3 className="font-semibold text-white">Loading...</h3>
+                      <span className="text-xs text-gray-400">Active now</span>
+                    </div>
+                  </div>
+                );
               })()}
 
               {/* Messages */}

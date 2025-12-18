@@ -353,37 +353,36 @@ export const notificationsAPI = {
 
 // MESSAGES API OBJECT
 export const messagesAPI = {
-  sendMessage: async (receiver_id, content) => {
-    const response = await axiosInstance.post(`${API_URL}/messages`, {
-      receiver_id,
+  // Send a message to another user
+  sendMessage: async (toUserId, content) => {
+    const response = await axiosInstance.post(`${API_URL}/chat/messages`, {
+      toUserId,
       content,
     });
     return response.data;
   },
 
+  // Get chat history with a specific user
   getConversation: async (userId) => {
-    const response = await axiosInstance.get(`${API_URL}/messages/conversation/${userId}`);
+    const response = await axiosInstance.get(`${API_URL}/chat/with/${userId}`);
     return response.data;
   },
 
+  // Get all conversations (list of people you've chatted with)
   getAllConversations: async () => {
-    const response = await axiosInstance.get(`${API_URL}/conversations`);
+    const response = await axiosInstance.get(`${API_URL}/chat/conversations`);
     return response.data;
   },
 
-  markAsRead: async (messageId) => {
-    const response = await axiosInstance.put(`${API_URL}/messages/${messageId}/read`);
-    return response.data;
-  },
-
+  // Mark messages from a user as read
   markConversationAsRead: async (userId) => {
-    const response = await axiosInstance.put(`${API_URL}/conversations/${userId}/read`);
+    const response = await axiosInstance.patch(`${API_URL}/chat/with/${userId}/read`);
     return response.data;
   },
 
-  deleteMessage: async (messageId) => {
-    const response = await axiosInstance.delete(`${API_URL}/messages/${messageId}`);
-    return response.data;
+  // Get real-time stream
+  subscribeToMessages: async () => {
+    return new EventSource(`${API_URL}/chat/stream`, { withCredentials: true });
   },
 };
 
@@ -439,6 +438,12 @@ export const friendshipsAPI = {
     return response.data;
   },
 
+  // Alias for getMyFriendships for compatibility
+  getConnections: async () => {
+    const response = await axiosInstance.get(`${API_URL}/friendships`);
+    return response.data;
+  },
+
   // Send friend request to other user id
   sendFriendRequest: async (toUserId) => {
     const response = await axiosInstance.post(`${API_URL}/friendships/request`, {
@@ -482,6 +487,12 @@ export const friendshipsAPI = {
     const response = await axiosInstance.get(`${API_URL}/friendships/suggestions`, {
       params: { limit, offset },
     });
+    return response.data;
+  },
+
+  // Get friendship status with another user
+  getFriendshipStatus: async (otherUserId) => {
+    const response = await axiosInstance.get(`${API_URL}/friendships/status/${otherUserId}`);
     return response.data;
   },
 };
