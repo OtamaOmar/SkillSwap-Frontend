@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Menu, Search, Users, LogOut, Mail, Bell, Edit, Camera, MapPin, Calendar, Award, Home, Heart, MessageCircle, Share2, Send, Trash2, Eye } from "lucide-react";
+import { Menu, Search, Users, LogOut, Mail, Edit, Camera, MapPin, Calendar, Award, Home, Heart, MessageCircle, Share2, Send, Trash2, Eye } from "lucide-react";
 import { userAPI, postAPI, friendshipsAPI } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 
@@ -34,6 +34,33 @@ export default function ProfilePage() {
   const [requestFeedback, setRequestFeedback] = useState("");
   const [relationship, setRelationship] = useState("none"); // none | pending_outgoing | pending_incoming | accepted
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Helpers to keep derived counts in sync when backend stats are missing/stale
+  const loadMyFriendsCount = useCallback(async () => {
+    try {
+      const connections = await friendshipsAPI.getMyFriendships();
+      const friendsCount = Array.isArray(connections?.connections)
+        ? connections.connections.length
+        : 0;
+
+      setProfile((prev) => {
+        if (!prev) return prev;
+        const currentFriends = Number(prev.stats?.friends || 0);
+        if (friendsCount !== currentFriends) {
+          return {
+            ...prev,
+            stats: {
+              ...(prev.stats || {}),
+              friends: friendsCount,
+            },
+          };
+        }
+        return prev;
+      });
+    } catch (error) {
+      console.error("Failed to load friends count:", error);
+    }
+  }, []);
 
   // DARK MODE
   useEffect(() => {
@@ -73,6 +100,11 @@ export default function ProfilePage() {
       // Load user posts
       loadUserPosts(userId);
 
+      // Ensure friends count for own profile when backend stats are missing/stale
+      if (!id) {
+        loadMyFriendsCount();
+      }
+
       // If viewing another user's profile, determine relationship status
       if (id) {
         try {
@@ -109,7 +141,7 @@ export default function ProfilePage() {
     } finally {
       setLoading(false);
     }
-  }, [id, navigate]);
+  }, [id, navigate, loadMyFriendsCount]);
 
   useEffect(() => {
     loadProfile();
@@ -122,6 +154,23 @@ export default function ProfilePage() {
       setLoadingPosts(true);
       const posts = await userAPI.getUserPosts(userId);
       setUserPosts(posts);
+
+      // If backend didn't return stats for the current profile, derive post count from fetched posts.
+      setProfile((prev) => {
+        if (!prev) return prev;
+        const derivedPosts = Array.isArray(posts) ? posts.length : 0;
+        const currentPosts = Number(prev.stats?.posts || 0);
+        if (derivedPosts > 0 && derivedPosts !== currentPosts) {
+          return {
+            ...prev,
+            stats: {
+              ...(prev.stats || {}),
+              posts: derivedPosts,
+            },
+          };
+        }
+        return prev;
+      });
     } catch (error) {
       console.error("Failed to load user posts:", error);
       setUserPosts([]);
@@ -364,48 +413,8 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* PROFILE + MENU */}
-        <div className="relative flex items-center gap-4">
-          {profile?.avatar_url ? (
-            <img
-              src={profile.avatar_url}
-              alt="Profile"
-              className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 object-cover"
-              onClick={() => setSettingsOpen(!settingsOpen)}
-            />
-          ) : (
-            <div
-              className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 bg-gray-300 dark:bg-gray-700 flex items-center justify-center"
-              onClick={() => setSettingsOpen(!settingsOpen)}
-            >
-              <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
-                {(profile?.full_name || 'U').charAt(0).toUpperCase()}
-              </span>
-            </div>
-          )}
-
-          {/* Dropdown */}
-          <div
-            className={`
-              absolute right-0 top-14 w-48 p-2 rounded-lg shadow-xl
-              bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700
-              transform transition-all duration-200 origin-top-right
-              ${settingsOpen
-                ? "opacity-100 scale-100 translate-y-0"
-                : "opacity-0 scale-95 -translate-y-2 pointer-events-none"}
-            `}
-          >
-            <button className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md cursor-pointer">
-              Profile Settings
-            </button>
-            <button className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md cursor-pointer">
-              Account
-            </button>
-            <button className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md cursor-pointer">
-              Help Center
-            </button>
-          </div>
-        </div>
+        {/* PROFILE + MENU hidden on profile page */}
+        <div className="relative flex items-center gap-4" />
       </header>
 
       {/* MAIN CONTENT WRAPPER */}
@@ -424,7 +433,6 @@ export default function ProfilePage() {
             <SidebarButton icon={<Home />} text="Feed" sidebarOpen={sidebarOpen} onClick={() => navigate("/feed")} />
             <SidebarButton icon={<Users />} text="Friends" sidebarOpen={sidebarOpen} />
             <SidebarButton icon={<Mail />} text="Messages" sidebarOpen={sidebarOpen} />
-            <SidebarButton icon={<Bell />} text="Notifications" sidebarOpen={sidebarOpen} />
           </div>
 
           <div>

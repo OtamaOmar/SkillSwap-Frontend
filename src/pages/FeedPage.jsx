@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Menu, Search, Users, LogOut, Heart, MessageCircle, Share2, Plus, Mail, Bell, Home, X, Eye } from "lucide-react";
-import { getCurrentUserProfile, isAuthenticated, postAPI, friendshipsAPI, notificationsAPI, searchAPI } from "../services/api";
+import { getCurrentUserProfile, isAuthenticated, postAPI, friendshipsAPI, notificationsAPI, searchAPI, userAPI } from "../services/api";
 
 export default function FeedPage() {
   const navigate = useNavigate();
@@ -28,6 +28,17 @@ export default function FeedPage() {
   const [newPostContent, setNewPostContent] = useState("");
   const [newPostImageUrl, setNewPostImageUrl] = useState("");
   const [incomingRequests, setIncomingRequests] = useState([]);
+  const [pendingRequests, setPendingRequests] = useState([]); // track ids we marked pending
+
+  // Resolve relative media paths (e.g., "/uploads/...") to backend URL
+  const resolveImageUrl = (url) => {
+    if (!url) return null;
+    if (/^https?:\/\//i.test(url)) return url;
+    const base = import.meta.env?.VITE_API_BASE_URL || "http://localhost:4000";
+    // Ensure single slash join
+    if (url.startsWith("/")) return `${base}${url}`;
+    return `${base}/${url}`;
+  };
 
   // Authentication guard - redirect if not logged in
   useEffect(() => {
@@ -39,8 +50,13 @@ export default function FeedPage() {
   const filteredSuggestions = useMemo(() => {
     const excludedIds = new Set(myFriends.map((f) => f.id));
     if (currentUser?.id) excludedIds.add(currentUser.id);
-    return friendSuggestions.filter((profile) => profile?.id && !excludedIds.has(profile.id));
-  }, [friendSuggestions, myFriends, currentUser?.id]);
+    return friendSuggestions
+      .filter((profile) => profile?.id && !excludedIds.has(profile.id))
+      .map((profile) => ({
+        ...profile,
+        pending: profile.pending || pendingRequests.includes(profile.id),
+      }));
+  }, [friendSuggestions, myFriends, currentUser?.id, pendingRequests]);
 
   // Fetch current user, posts feed, and friend suggestions
   useEffect(() => {
@@ -69,10 +85,35 @@ export default function FeedPage() {
       // Non-critical: friend suggestions (already filtered server-side to exclude existing relationships)
       try {
         const suggestionsRes = await friendshipsAPI.getSuggestions(8, 0);
-        setFriendSuggestions(suggestionsRes?.suggestions || []);
+        const mapPending = (list) =>
+          (Array.isArray(list) ? list : []).map((u) => ({
+            ...u,
+            pending: pendingRequests.includes(u.id),
+          }));
+
+        if (Array.isArray(suggestionsRes?.suggestions) && suggestionsRes.suggestions.length > 0) {
+          setFriendSuggestions(mapPending(suggestionsRes.suggestions));
+        } else {
+          // Fallback: show any other users not already friends or self
+          const allUsers = await userAPI.getAllUsers();
+          const safeUsers = Array.isArray(allUsers)
+            ? allUsers.filter(u => u.id && u.id !== userProfile.id)
+            : [];
+          setFriendSuggestions(mapPending(safeUsers));
+        }
       } catch (e) {
         console.error("Friend suggestions failed (non-blocking)", e?.message || e, e);
-        setFriendSuggestions([]);
+        try {
+          const allUsers = await userAPI.getAllUsers();
+          const safeUsers = Array.isArray(allUsers)
+            ? allUsers.filter(u => u.id && u.id !== userProfile.id)
+            : [];
+          setFriendSuggestions(
+            safeUsers.map((u) => ({ ...u, pending: pendingRequests.includes(u.id) }))
+          );
+        } catch {
+          setFriendSuggestions([]);
+        }
       }
 
       // Fetch accepted friendships (My Friends)
@@ -249,20 +290,21 @@ export default function FeedPage() {
   };
 
   const sendRequest = async (toUserId) => {
+    // Optimistically mark as pending so the row stays visible
+    setFriendSuggestions((prev) =>
+      prev.map((p) => (p.id === toUserId ? { ...p, pending: true } : p))
+    );
+    setPendingRequests((prev) => (prev.includes(toUserId) ? prev : [...prev, toUserId]));
     try {
       await friendshipsAPI.sendFriendRequest(toUserId);
-      const suggestions = await friendshipsAPI.getSuggestions(8, 0);
-      setFriendSuggestions(suggestions?.suggestions || []);
     } catch (e) {
       console.error("sendRequest error:", e);
       setError(e?.message || "Failed to send friend request");
-      // Refresh suggestions in case backend already has a pending row
-      try {
-        const suggestions = await friendshipsAPI.getSuggestions(8, 0);
-        setFriendSuggestions(suggestions?.suggestions || []);
-      } catch (_) {
-        /* swallow secondary error */
-      }
+      // Rollback optimistic pending on failure
+      setFriendSuggestions((prev) =>
+        prev.map((p) => (p.id === toUserId ? { ...p, pending: false } : p))
+      );
+      setPendingRequests((prev) => prev.filter((id) => id !== toUserId));
     }
   };
 
@@ -277,8 +319,23 @@ export default function FeedPage() {
         }))
       : [];
     setMyFriends(friends);
+
+    const mapPending = (list) =>
+      (Array.isArray(list) ? list : []).map((u) => ({
+        ...u,
+        pending: pendingRequests.includes(u.id),
+      }));
+
     const suggestions = await friendshipsAPI.getSuggestions(8, 0);
-    setFriendSuggestions(suggestions?.suggestions || []);
+    if (Array.isArray(suggestions?.suggestions) && suggestions.suggestions.length > 0) {
+      setFriendSuggestions(mapPending(suggestions.suggestions));
+    } else {
+      const allUsers = await userAPI.getAllUsers();
+      const safeUsers = Array.isArray(allUsers)
+        ? allUsers.filter(u => u.id && u.id !== currentUser?.id)
+        : [];
+      setFriendSuggestions(mapPending(safeUsers));
+    }
   };
 
   const acceptFriendRequest = async (otherUserId) => {
@@ -431,7 +488,7 @@ export default function FeedPage() {
           
           {currentUser?.avatar_url ? (
             <img
-              src={currentUser.avatar_url}
+              src={resolveImageUrl(currentUser.avatar_url)}
               alt="Profile"
               className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 object-cover"
               onClick={() => navigate("/profile")}
@@ -465,7 +522,6 @@ export default function FeedPage() {
             <SidebarButton icon={<Home />} text="Feed" sidebarOpen={sidebarOpen} onClick={() => navigate("/feed")} />
             <SidebarButton icon={<Users />} text="Friends" sidebarOpen={sidebarOpen} />
             <SidebarButton icon={<Mail/>} text="Messages" sidebarOpen={sidebarOpen}onClick={() => navigate("/chat")} />
-            <SidebarButton icon={<Bell />} text="Notifications" sidebarOpen={sidebarOpen} />
           </div>
              
           <div>
@@ -643,7 +699,7 @@ export default function FeedPage() {
                             <div className="flex gap-2">
                               {comment.avatar_url ? (
                                 <img 
-                                  src={comment.avatar_url}
+                                  src={resolveImageUrl(comment.avatar_url)}
                                   alt={comment.username}
                                   className="w-6 h-6 rounded-full"
                                 />
@@ -729,7 +785,7 @@ export default function FeedPage() {
                     <div className="flex items-center gap-3 flex-1">
                       {f.avatar_url ? (
                         <img
-                          src={f.avatar_url}
+                          src={resolveImageUrl(f.avatar_url)}
                           className="w-9 h-9 rounded-full border border-emerald-500 object-cover"
                           alt={f.full_name || f.username || "Friend"}
                         />
@@ -824,7 +880,7 @@ export default function FeedPage() {
                     <div className="flex items-center gap-3 flex-1">
                       {profile.avatar_url ? (
                         <img
-                          src={profile.avatar_url}
+                          src={resolveImageUrl(profile.avatar_url)}
                           className="w-10 h-10 rounded-full border border-emerald-500 object-cover"
                           alt={profile.full_name || profile.username}
                         />
@@ -844,8 +900,20 @@ export default function FeedPage() {
                         </p>
                       </div>
                     </div>
-                    <button onClick={() => sendRequest(profile.id)} className="p-1.5 rounded-full hover:bg-emerald-500/20 text-emerald-500 transition cursor-pointer shrink-0">
-                      <Plus size={18} />
+                    <button
+                      onClick={() => sendRequest(profile.id)}
+                      disabled={profile.pending}
+                      className={`p-1.5 rounded-full transition cursor-pointer shrink-0 border ${
+                        profile.pending
+                          ? "bg-gray-200 dark:bg-gray-700 text-gray-500 border-transparent cursor-not-allowed"
+                          : "hover:bg-emerald-500/20 text-emerald-500 border-transparent"
+                      }`}
+                    >
+                      {profile.pending ? (
+                        <span className="text-xs font-semibold">Pending</span>
+                      ) : (
+                        <Plus size={18} />
+                      )}
                     </button>
                   </div>
                 ))

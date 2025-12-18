@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Menu, Search, Users, LogOut, Send, Bell, Mail, ArrowLeft } from "lucide-react";
+import { Menu, Search, Users, LogOut, Send, Mail, ArrowLeft } from "lucide-react";
 import { messagesAPI, getCurrentUserProfile, friendshipsAPI } from "../services/api";
 
 export default function ChatPage() {
@@ -230,7 +230,6 @@ export default function ChatPage() {
             <SidebarButton icon={<ArrowLeft />} text="Back to Feed" sidebarOpen={sidebarOpen} onClick={() => navigate("/feed")} />
             <SidebarButton icon={<Users />} text="Friends" sidebarOpen={sidebarOpen} />
             <SidebarButton icon={<Mail />} text="Chats" sidebarOpen={sidebarOpen} onClick={() => navigate("/chat")} />
-            <SidebarButton icon={<Bell />} text="Status" sidebarOpen={sidebarOpen} />
           </div>
 
           <div className="flex flex-col gap-1">
