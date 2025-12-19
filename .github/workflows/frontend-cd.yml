@@ -1,0 +1,73 @@
+name: Frontend CD
+
+on:
+  workflow_run:
+    workflows: ["Frontend CI/CD"]
+    types:
+      - completed
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.workflow_run.head_commit }}
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Build
+      run: npm run build
+      env:
+        CI: true
+        VITE_API_URL: ${{ secrets.PRODUCTION_API_URL }}
+
+    - name: Deploy to Netlify
+      uses: nwtgck/actions-netlify@v2.1
+      with:
+        publish-dir: './dist'
+        production-branch: main
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        deploy-message: 'Deploy from GitHub Actions'
+        enable-pull-request-comment: true
+        enable-commit-comment: true
+      env:
+        NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+    - name: Deploy to Vercel (Alternative)
+      run: |
+        npm install -g vercel
+        vercel --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+    - name: Deploy to GitHub Pages (Alternative)
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./dist
+
+    - name: Run smoke tests
+      run: |
+        echo "Running smoke tests on deployed site..."
+        # Add curl requests or test calls here
+      env:
+        DEPLOYED_URL: ${{ secrets.PRODUCTION_FRONTEND_URL }}
+
+    - name: Notify deployment status
+      if: always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const status = '${{ job.status }}';
+          const message = `Frontend deployment ${status}`;
+          console.log(message);

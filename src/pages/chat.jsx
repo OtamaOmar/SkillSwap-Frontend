@@ -1,32 +1,23 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { Menu, Search, Users, LogOut, Send, Bell, Mail, ArrowLeft } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Menu, Search, Users, LogOut, Send, Mail, ArrowLeft } from "lucide-react";
+import { messagesAPI, getCurrentUserProfile, friendshipsAPI } from "../services/api";
 
 export default function ChatPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode] = useState(localStorage.getItem("theme") === "dark");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedChat, setSelectedChat] = useState(null);
   const [messageInput, setMessageInput] = useState("");
-
-  const [chats] = useState(
-    [...Array(8)].map((_, i) => ({
-      id: i,
-      name: `User ${i + 20}`,
-      lastMessage: `Hey! This is the last message from conversation ${i + 1}`,
-      time: `${i + 1}h ago`,
-      unread: i % 3 === 0 ? i + 1 : 0,
-      avatar: `https://i.pravatar.cc/40?img=${i + 20}`
-    }))
-  );
-
-  const [messages, setMessages] = useState([
-    { id: 1, sender: "them", text: "Hey! How are you?", time: "10:30 AM" },
-    { id: 2, sender: "me", text: "I'm doing great! How about you?", time: "10:32 AM" },
-    { id: 3, sender: "them", text: "Pretty good! Want to exchange skills?", time: "10:33 AM" },
-    { id: 4, sender: "me", text: "Sure! What skills are you interested in?", time: "10:35 AM" },
-  ]);
+  
+  // Real data from API
+  const [chats, setChats] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [friendsMap, setFriendsMap] = useState({});
 
   useEffect(() => {
     if (darkMode) {
@@ -38,19 +29,129 @@ export default function ChatPage() {
     }
   }, [darkMode]);
 
-  const handleSendMessage = () => {
-    if (messageInput.trim() && selectedChat !== null) {
-      setMessages([
-        ...messages,
-        {
-          id: messages.length + 1,
-          sender: "me",
-          text: messageInput,
-          time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-        }
-      ]);
-      setMessageInput("");
+  // Load conversations on mount and check for URL parameter
+  useEffect(() => {
+    loadConversations();
+    loadCurrentUser();
+    loadFriendsList();
+
+    // Check if there's a "with" parameter in URL
+    const withUserId = searchParams.get("with");
+    if (withUserId) {
+      setSelectedChat(withUserId);
+      loadChatMessages(withUserId);
     }
+  }, [searchParams]);
+
+  const loadCurrentUser = async () => {
+    try {
+      const user = await getCurrentUserProfile();
+      setCurrentUser(user);
+    } catch (err) {
+      console.error("Failed to load current user:", err);
+    }
+  };
+
+  const loadFriendsList = async () => {
+    try {
+      const response = await friendshipsAPI.getConnections();
+      const connections = response.connections || [];
+      const friendsMapTemp = {};
+      connections.forEach(conn => {
+        friendsMapTemp[conn.user.id] = {
+          id: conn.user.id,
+          username: conn.user.username,
+          full_name: conn.user.full_name,
+          avatar_url: conn.user.avatar_url,
+        };
+      });
+      setFriendsMap(friendsMapTemp);
+    } catch (err) {
+      console.error("Failed to load friends list:", err);
+    }
+  };
+
+  const loadConversations = async () => {
+    try {
+      setLoading(true);
+      const response = await messagesAPI.getAllConversations();
+      // The backend returns { count, conversations } where conversations use 'other_id'
+      const conversations = response.conversations ? response.conversations.map(conv => ({
+        user_id: conv.other_id,
+        username: conv.username,
+        full_name: conv.full_name,
+        avatar_url: conv.avatar_url,
+        last_message: conv.last_message,
+        last_message_time: conv.last_message_time,
+        unread_count: conv.unread_count,
+      })) : [];
+      setChats(Array.isArray(conversations) ? conversations : []);
+    } catch (err) {
+      console.error("Failed to load conversations:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadChatMessages = async (userId) => {
+    try {
+      setLoading(true);
+      const response = await messagesAPI.getConversation(userId);
+      // Backend returns { limit, offset, count, messages }
+      const msgs = response.messages ? response.messages.map(msg => ({
+        id: msg.id,
+        sender_id: msg.sender_id,
+        receiver_id: msg.receiver_id,
+        content: msg.content,
+        created_at: msg.created_at,
+        read_at: msg.read_at,
+      })) : [];
+      setMessages(Array.isArray(msgs) ? msgs.reverse() : []);
+      // Mark all as read
+      await messagesAPI.markConversationAsRead(userId);
+    } catch (err) {
+      console.error("Failed to load messages:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelectChat = (chat) => {
+    setSelectedChat(chat.user_id);
+    loadChatMessages(chat.user_id);
+  };
+
+  const handleSendMessage = async () => {
+    if (!messageInput.trim() || !selectedChat) return;
+
+    try {
+      await messagesAPI.sendMessage(selectedChat, messageInput);
+      setMessageInput("");
+      // Reload chat messages
+      await loadChatMessages(selectedChat);
+      // Reload conversations
+      await loadConversations();
+    } catch (err) {
+      console.error("Failed to send message:", err);
+    }
+  };
+
+  const getChatDisplayList = () => {
+    const chatsList = [...chats];
+    // If selectedChat is not in the list but is in friendsMap, add it temporarily
+    if (selectedChat && !chats.find(c => c.user_id === selectedChat) && friendsMap[selectedChat]) {
+      const friend = friendsMap[selectedChat];
+      chatsList.unshift({
+        user_id: friend.id,
+        username: friend.username,
+        full_name: friend.full_name,
+        avatar_url: friend.avatar_url,
+        last_message: "New conversation",
+        last_message_time: "now",
+        unread_count: 0,
+      });
+    }
+    return chatsList;
   };
 
   return (
@@ -82,12 +183,12 @@ export default function ChatPage() {
 
         {/* PROFILE + MENU */}
         <div className="relative flex items-center gap-4">
-          <img
-            src="https://i.pravatar.cc/40"
-            alt="Profile"
-            className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700"
+          <div
+            className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 bg-gray-300 dark:bg-gray-700 flex items-center justify-center"
             onClick={() => setSettingsOpen(!settingsOpen)}
-          />
+          >
+            <span className="text-sm font-bold text-gray-600 dark:text-gray-400">U</span>
+          </div>
 
           {/* Dropdown */}
           <div
@@ -129,7 +230,6 @@ export default function ChatPage() {
             <SidebarButton icon={<ArrowLeft />} text="Back to Feed" sidebarOpen={sidebarOpen} onClick={() => navigate("/feed")} />
             <SidebarButton icon={<Users />} text="Friends" sidebarOpen={sidebarOpen} />
             <SidebarButton icon={<Mail />} text="Chats" sidebarOpen={sidebarOpen} onClick={() => navigate("/chat")} />
-            <SidebarButton icon={<Bell />} text="Status" sidebarOpen={sidebarOpen} />
           </div>
 
           <div className="flex flex-col gap-1">
@@ -150,39 +250,48 @@ export default function ChatPage() {
           <div className="p-3">
             <h2 className="text-xl font-bold mb-3 text-white px-2">Chats</h2>
             <div className="space-y-0">
-              {chats.map((chat) => (
-                <div
-                  key={chat.id}
-                  onClick={() => setSelectedChat(chat.id)}
-                  className={`p-3 cursor-pointer transition-colors border-b border-gray-800 dark:border-gray-800 ${
-                    selectedChat === chat.id
-                      ? "bg-gray-800 dark:bg-gray-800"
-                      : "hover:bg-gray-800 dark:hover:bg-gray-800"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <img
-                      src={chat.avatar}
-                      alt={chat.name}
-                      className="w-12 h-12 rounded-full"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <h3 className="font-semibold text-sm text-white">{chat.name}</h3>
-                        <span className="text-xs text-gray-400">{chat.time}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm text-gray-400 truncate flex-1">{chat.lastMessage}</p>
-                        {chat.unread > 0 && (
-                          <span className="ml-2 flex-shrink-0 w-5 h-5 flex items-center justify-center text-xs bg-emerald-500 text-white rounded-full">
-                            {chat.unread}
+              {loading ? (
+                <div className="p-4 text-center text-gray-400">Loading conversations...</div>
+              ) : getChatDisplayList().length === 0 ? (
+                <div className="p-4 text-center text-gray-400">No conversations yet</div>
+              ) : (
+                getChatDisplayList().map((chat) => (
+                  <div
+                    key={chat.user_id}
+                    onClick={() => handleSelectChat(chat)}
+                    className={`p-3 cursor-pointer transition-colors border-b border-gray-800 dark:border-gray-800 ${
+                      selectedChat === chat.user_id
+                        ? "bg-gray-800 dark:bg-gray-800"
+                        : "hover:bg-gray-800 dark:hover:bg-gray-800"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      {chat.avatar_url ? (
+                        <img
+                          src={chat.avatar_url}
+                          alt={chat.username}
+                          className="w-12 h-12 rounded-full"
+                        />
+                      ) : (
+                        <div className="w-12 h-12 rounded-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                          <span className="text-lg font-bold text-gray-600 dark:text-gray-400">
+                            {(chat.full_name || chat.username || 'U').charAt(0).toUpperCase()}
                           </span>
-                        )}
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-1">
+                          <h3 className="font-semibold text-sm text-white">{chat.full_name || chat.username}</h3>
+                          <span className="text-xs text-gray-400">{chat.last_message_time || "now"}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm text-gray-400 truncate flex-1">{chat.last_message || "No messages yet"}</p>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </aside>
@@ -194,39 +303,67 @@ export default function ChatPage() {
           {selectedChat !== null ? (
             <>
               {/* Chat Header */}
-             <div className="h-16 bg-red-800 dark:bg-gray-800 border-b border-gray-700 dark:border-gray-700 px-6 flex items-center gap-4">
-                <img
-                  src={chats[selectedChat]?.avatar}
-                  alt={chats[selectedChat]?.name}
-                  className="w-10 h-10 rounded-full"
-                />
-                <div>
-                  <h3 className="font-semibold text-white">{chats[selectedChat]?.name}</h3>
-                  <span className="text-xs text-gray-400">Active now</span>
-                </div>
-              </div>
+              {(() => {
+                const selectedChatData = chats.find(c => c.user_id === selectedChat) || friendsMap[selectedChat];
+                return selectedChatData ? (
+                  <div className="h-16 bg-emerald-700 dark:bg-gray-800 border-b border-gray-700 dark:border-gray-700 px-6 flex items-center gap-4">
+                    {selectedChatData.avatar_url ? (
+                      <img
+                        src={selectedChatData.avatar_url}
+                        alt={selectedChatData.username}
+                        className="w-10 h-10 rounded-full"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                        <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
+                          {(selectedChatData.full_name || selectedChatData.username || 'U').charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                    )}
+                    <div>
+                      <h3 className="font-semibold text-white">{selectedChatData.full_name || selectedChatData.username}</h3>
+                      <span className="text-xs text-gray-400">Active now</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-16 bg-emerald-700 dark:bg-gray-800 border-b border-gray-700 dark:border-gray-700 px-6 flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-gray-600"></div>
+                    <div>
+                      <h3 className="font-semibold text-white">Loading...</h3>
+                      <span className="text-xs text-gray-400">Active now</span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-6 space-y-3 bg-gray-900 dark:bg-gray-950">
-                {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`flex ${message.sender === "me" ? "justify-end" : "justify-start"}`}
-                  >
+                {loading ? (
+                  <div className="flex items-center justify-center h-full text-gray-400">Loading messages...</div>
+                ) : messages.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-gray-400">No messages yet. Start the conversation!</div>
+                ) : (
+                  messages.map((message) => (
                     <div
-                      className={`max-w-md px-4 py-2 rounded-lg ${
-                        message.sender === "me"
-                          ? "bg-emerald-600 text-white rounded-br-none"
-                          : "bg-gray-800 text-white rounded-bl-none"
-                      }`}
+                      key={message.id}
+                      className={`flex ${message.sender_id === currentUser?.id ? "justify-end" : "justify-start"}`}
                     >
-                      <p className="text-sm">{message.text}</p>
-                      <span className={`text-xs block text-right mt-1 ${message.sender === "me" ? "text-emerald-100" : "text-gray-400"}`}>
-                        {message.time}
-                      </span>
+                      <div
+                        className={`max-w-md px-4 py-2 rounded-lg ${
+                          message.sender_id === currentUser?.id
+                            ? "bg-emerald-600 text-white rounded-br-none"
+                            : "bg-gray-800 text-white rounded-bl-none"
+                        }`}
+                      >
+                        <p className="text-sm">{message.content}</p>
+                        <span className={`text-xs block text-right mt-1 ${message.sender_id === currentUser?.id ? "text-emerald-100" : "text-gray-400"}`}>
+                          {new Date(message.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                          {message.read_at && <span> ✓✓</span>}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
 
               {/* Message Input */}

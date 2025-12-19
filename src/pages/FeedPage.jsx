@@ -1,17 +1,43 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Menu, Search, Users, LogOut, Heart, MessageCircle, Share2, Plus, Mail, Bell, Home } from "lucide-react";
-import { getAllProfiles, getCurrentUserProfile, isAuthenticated } from "../services/api";
+import { Menu, Search, Users, LogOut, Heart, MessageCircle, Share2, Plus, Mail, Bell, Home, X, Eye } from "lucide-react";
+import { getCurrentUserProfile, isAuthenticated, postAPI, friendshipsAPI, notificationsAPI, searchAPI, userAPI } from "../services/api";
 
 export default function FeedPage() {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode] = useState(localStorage.getItem("theme") === "dark");
-  const [profiles, setProfiles] = useState([]);
+  const [posts, setPosts] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [friendSuggestions, setFriendSuggestions] = useState([]);
+  const [myFriends, setMyFriends] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [likeLoadingId, setLikeLoadingId] = useState(null);
+  const [commentText, setCommentText] = useState("");
+  const [commentPostId, setCommentPostId] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [replyText, setReplyText] = useState("");
+  const [expandedPostId, setExpandedPostId] = useState(null);
+  const [newPostContent, setNewPostContent] = useState("");
+  const [newPostImageUrl, setNewPostImageUrl] = useState("");
+  const [incomingRequests, setIncomingRequests] = useState([]);
+  const [pendingRequests, setPendingRequests] = useState([]); // track ids we marked pending
+
+  // Resolve relative media paths (e.g., "/uploads/...") to backend URL
+  const resolveImageUrl = (url) => {
+    if (!url) return null;
+    if (/^https?:\/\//i.test(url)) return url;
+    const base = import.meta.env?.VITE_API_BASE_URL || "http://localhost:4000";
+    // Ensure single slash join
+    if (url.startsWith("/")) return `${base}${url}`;
+    return `${base}/${url}`;
+  };
 
   // Authentication guard - redirect if not logged in
   useEffect(() => {
@@ -20,40 +46,109 @@ export default function FeedPage() {
     }
   }, [navigate]);
 
-  // Fetch current user and all profiles
+  const filteredSuggestions = useMemo(() => {
+    const excludedIds = new Set(myFriends.map((f) => f.id));
+    if (currentUser?.id) excludedIds.add(currentUser.id);
+    return friendSuggestions
+      .filter((profile) => profile?.id && !excludedIds.has(profile.id))
+      .map((profile) => ({
+        ...profile,
+        pending: profile.pending || pendingRequests.includes(profile.id),
+      }));
+  }, [friendSuggestions, myFriends, currentUser?.id, pendingRequests]);
+
+  // Fetch current user, posts feed, and friend suggestions
   useEffect(() => {
     const fetchData = async () => {
+      setLoading(true);
+      setError("");
+      let userProfile;
       try {
-        setLoading(true);
-        setError("");
-        
-        // Fetch current user profile
-        const userProfile = await getCurrentUserProfile();
+        // Fetch current user profile first (auth gate)
+        userProfile = await getCurrentUserProfile();
         setCurrentUser(userProfile);
-        
-        // Fetch all profiles
-        const allProfiles = await getAllProfiles();
-        
-        // Ensure allProfiles is an array
-        if (!Array.isArray(allProfiles)) {
-          throw new Error("Invalid profiles data format");
-        }
-        
-        // Filter out current user from profiles feed
-        const otherProfiles = allProfiles.filter(p => p.id !== userProfile.id);
-        setProfiles(otherProfiles);
-        
-        // Get random profiles for friend suggestions
-        const shuffled = [...otherProfiles].sort(() => 0.5 - Math.random());
-        setFriendSuggestions(shuffled.slice(0, 8));
-        
+
+        // Fetch posts feed (critical)
+        const feedPosts = await postAPI.getAllPosts();
+        setPosts(Array.isArray(feedPosts) ? feedPosts : []);
       } catch (err) {
-        console.error("FeedPage fetchData error:", err);
-        setError(err.message || "Failed to load data");
-        // If authentication error, redirect to login
-        if (err.message.includes("token") || err.message.includes("authentication")) {
+        console.error("FeedPage critical fetch error:", err);
+        setError(err.message || "Failed to load feed");
+        if (err.message?.toLowerCase().includes("token") || err.message?.toLowerCase().includes("authentication")) {
           navigate("/login", { replace: true });
         }
+        setLoading(false);
+        return;
+      }
+
+      // Non-critical: friend suggestions (already filtered server-side to exclude existing relationships)
+      try {
+        const suggestionsRes = await friendshipsAPI.getSuggestions(8, 0);
+        const mapPending = (list) =>
+          (Array.isArray(list) ? list : []).map((u) => ({
+            ...u,
+            pending: pendingRequests.includes(u.id),
+          }));
+
+        if (Array.isArray(suggestionsRes?.suggestions) && suggestionsRes.suggestions.length > 0) {
+          setFriendSuggestions(mapPending(suggestionsRes.suggestions));
+        } else {
+          // Fallback: show any other users not already friends or self
+          const allUsers = await userAPI.getAllUsers();
+          const safeUsers = Array.isArray(allUsers)
+            ? allUsers.filter(u => u.id && u.id !== userProfile.id)
+            : [];
+          setFriendSuggestions(mapPending(safeUsers));
+        }
+      } catch (e) {
+        console.error("Friend suggestions failed (non-blocking)", e?.message || e, e);
+        try {
+          const allUsers = await userAPI.getAllUsers();
+          const safeUsers = Array.isArray(allUsers)
+            ? allUsers.filter(u => u.id && u.id !== userProfile.id)
+            : [];
+          setFriendSuggestions(
+            safeUsers.map((u) => ({ ...u, pending: pendingRequests.includes(u.id) }))
+          );
+        } catch {
+          setFriendSuggestions([]);
+        }
+      }
+
+      // Fetch accepted friendships (My Friends)
+      try {
+        const connectionsRes = await friendshipsAPI.getMyFriendships();
+        const connections = Array.isArray(connectionsRes?.connections)
+          ? connectionsRes.connections.map(c => ({
+              id: c.user?.id,
+              username: c.user?.username,
+              full_name: c.user?.full_name,
+              avatar_url: c.user?.avatar_url,
+            }))
+          : [];
+        setMyFriends(connections);
+      } catch (e) {
+        console.error("My friends fetch failed (non-blocking)", e?.message || e);
+        setMyFriends([]);
+      }
+
+      try {
+        const notifs = await notificationsAPI.getNotifications();
+        setNotifications(Array.isArray(notifs) ? notifs : []);
+        const unread = await notificationsAPI.getUnreadCount();
+        setUnreadCount(unread?.unread_count || 0);
+      } catch (e) {
+        console.warn("Notifications fetch failed (non-blocking)", e?.message || e);
+        setNotifications([]);
+        setUnreadCount(0);
+      }
+
+      try {
+        const incoming = await friendshipsAPI.getIncomingRequests();
+        setIncomingRequests(incoming?.requests || []);
+      } catch (e) {
+        console.warn("Incoming requests fetch failed (non-blocking)", e?.message || e);
+        setIncomingRequests([]);
       } finally {
         setLoading(false);
       }
@@ -62,7 +157,7 @@ export default function FeedPage() {
     if (isAuthenticated()) {
       fetchData();
     }
-  }, [navigate]);
+  }, [navigate, pendingRequests]);
 
   // DARK MODE
   useEffect(() => {
@@ -74,6 +169,217 @@ export default function FeedPage() {
       localStorage.setItem("theme", "light");
     }
   }, [darkMode]);
+
+  const toggleLike = async (postId, liked) => {
+    try {
+      setLikeLoadingId(postId);
+      if (liked) {
+        await postAPI.unlikePost(postId);
+      } else {
+        await postAPI.likePost(postId);
+      }
+      // Refresh posts minimally
+      const feedPosts = await postAPI.getAllPosts();
+      setPosts(Array.isArray(feedPosts) ? feedPosts : []);
+    } catch (e) {
+      console.error("toggleLike error:", e);
+    } finally {
+      setLikeLoadingId(null);
+    }
+  };
+
+  const submitComment = async (e) => {
+    e.preventDefault();
+    if (!commentPostId || !commentText.trim()) return;
+    try {
+      await postAPI.addComment(commentPostId, commentText.trim());
+      const postIdToExpand = commentPostId;
+      setCommentText("");
+      setCommentPostId(null);
+      const feedPosts = await postAPI.getAllPosts();
+      setPosts(Array.isArray(feedPosts) ? feedPosts : []);
+      // Keep the post expanded to show the new comment
+      setExpandedPostId(postIdToExpand);
+    } catch (e) {
+      console.error("submitComment error:", e);
+    }
+  };
+
+  const handleSearch = async (e) => {
+    const query = e.target.value;
+    setSearchQuery(query);
+    
+    if (!query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    
+    try {
+      const results = await searchAPI.searchPosts(query);
+      setSearchResults(Array.isArray(results) ? results : []);
+    } catch (err) {
+      console.error("Search error:", err);
+      setSearchResults([]);
+    }
+  };
+
+  const handleShare = async (postId) => {
+    try {
+      await postAPI.sharePost(postId);
+      const feedPosts = await postAPI.getAllPosts();
+      setPosts(Array.isArray(feedPosts) ? feedPosts : []);
+    } catch (e) {
+      console.error("Share error:", e);
+    }
+  };
+
+  const submitNewPost = async (e) => {
+    e.preventDefault();
+    const content = newPostContent.trim();
+    if (!content) return;
+    try {
+      await postAPI.createPost(content, newPostImageUrl.trim() || null);
+      setNewPostContent("");
+      setNewPostImageUrl("");
+      const feedPosts = await postAPI.getAllPosts();
+      setPosts(Array.isArray(feedPosts) ? feedPosts : []);
+    } catch (err) {
+      console.error("Create post error:", err);
+      setError(err.message || "Failed to create post");
+    }
+  };
+
+  const handleReply = async (commentId) => {
+    if (!replyText.trim()) return;
+    try {
+      await postAPI.addCommentReply(commentId, replyText.trim());
+      setReplyText("");
+      setReplyingTo(null);
+      const feedPosts = await postAPI.getAllPosts();
+      setPosts(Array.isArray(feedPosts) ? feedPosts : []);
+    } catch (e) {
+      console.error("Reply error:", e);
+    }
+  };
+
+  const markNotificationAsRead = async (notifId) => {
+    try {
+      await notificationsAPI.markAsRead(notifId);
+      const notifs = await notificationsAPI.getNotifications();
+      setNotifications(Array.isArray(notifs) ? notifs : []);
+      const unread = await notificationsAPI.getUnreadCount();
+      setUnreadCount(unread?.unread_count || 0);
+    } catch (e) {
+      console.error("Mark as read error:", e);
+    }
+  };
+
+  const deleteNotification = async (notifId) => {
+    try {
+      await notificationsAPI.deleteNotification(notifId);
+      const notifs = await notificationsAPI.getNotifications();
+      setNotifications(Array.isArray(notifs) ? notifs : []);
+    } catch (e) {
+      console.error("Delete notification error:", e);
+    }
+  };
+
+  const sendRequest = async (toUserId) => {
+    // Optimistically mark as pending so the row stays visible
+    setFriendSuggestions((prev) =>
+      prev.map((p) => (p.id === toUserId ? { ...p, pending: true } : p))
+    );
+    setPendingRequests((prev) => (prev.includes(toUserId) ? prev : [...prev, toUserId]));
+    try {
+      await friendshipsAPI.sendFriendRequest(toUserId);
+    } catch (e) {
+      console.error("sendRequest error:", e);
+      setError(e?.message || "Failed to send friend request");
+      // Rollback optimistic pending on failure
+      setFriendSuggestions((prev) =>
+        prev.map((p) => (p.id === toUserId ? { ...p, pending: false } : p))
+      );
+      setPendingRequests((prev) => prev.filter((id) => id !== toUserId));
+    }
+  };
+
+  const refreshFriendsAndSuggestions = async () => {
+    const connections = await friendshipsAPI.getConnections();
+    const friends = Array.isArray(connections?.connections)
+      ? connections.connections.map((c) => ({
+          id: c.user.id,
+          username: c.user.username,
+          full_name: c.user.full_name,
+          avatar_url: c.user.avatar_url,
+        }))
+      : [];
+    setMyFriends(friends);
+
+    const mapPending = (list) =>
+      (Array.isArray(list) ? list : []).map((u) => ({
+        ...u,
+        pending: pendingRequests.includes(u.id),
+      }));
+
+    const suggestions = await friendshipsAPI.getSuggestions(8, 0);
+    if (Array.isArray(suggestions?.suggestions) && suggestions.suggestions.length > 0) {
+      setFriendSuggestions(mapPending(suggestions.suggestions));
+    } else {
+      const allUsers = await userAPI.getAllUsers();
+      const safeUsers = Array.isArray(allUsers)
+        ? allUsers.filter(u => u.id && u.id !== currentUser?.id)
+        : [];
+      setFriendSuggestions(mapPending(safeUsers));
+    }
+  };
+
+  const acceptFriendRequest = async (otherUserId) => {
+    try {
+      const status = await friendshipsAPI.getFriendshipStatus(otherUserId);
+      if (status?.status === "accepted") {
+        const incoming = await friendshipsAPI.getIncomingRequests();
+        setIncomingRequests(incoming?.requests || []);
+        await refreshFriendsAndSuggestions();
+        const notifs = await notificationsAPI.getNotifications();
+        setNotifications(Array.isArray(notifs) ? notifs : []);
+        return;
+      }
+
+      await friendshipsAPI.acceptFriendRequest(otherUserId);
+
+      const incoming = await friendshipsAPI.getIncomingRequests();
+      setIncomingRequests(incoming?.requests || []);
+      await refreshFriendsAndSuggestions();
+      const notifs = await notificationsAPI.getNotifications();
+      setNotifications(Array.isArray(notifs) ? notifs : []);
+    } catch (e) {
+      console.error("Accept request error:", e);
+      // For 409/not-pending, refresh lists to drop stale UI entries
+      try {
+        const incoming = await friendshipsAPI.getIncomingRequests();
+        setIncomingRequests(incoming?.requests || []);
+        await refreshFriendsAndSuggestions();
+        const notifs = await notificationsAPI.getNotifications();
+        setNotifications(Array.isArray(notifs) ? notifs : []);
+      } catch {
+        /* swallow refresh error */
+      }
+    }
+  };
+
+  const rejectFriendRequest = async (otherUserId) => {
+    try {
+      await friendshipsAPI.rejectFriendRequest(otherUserId);
+      // Refresh incoming requests
+      const incoming = await friendshipsAPI.getIncomingRequests();
+      setIncomingRequests(incoming?.requests || []);
+      // Refresh notifications
+      const notifs = await notificationsAPI.getNotifications();
+      setNotifications(Array.isArray(notifs) ? notifs : []);
+    } catch (e) {
+      console.error("Reject request error:", e);
+    }
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-white dark:bg-gray-900 text-black dark:text-white">
@@ -97,21 +403,101 @@ export default function FeedPage() {
           <div className="relative w-full max-w-md">
             <input
               type="text"
-              placeholder="Search..."
+              placeholder="Search posts..."
+              value={searchQuery}
+              onChange={handleSearch}
               className="w-full rounded-full border border-gray-300 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 px-4 py-2 pl-10 text-base"
             />
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-300" size={20} />
           </div>
         </div>
 
-        {/* PROFILE + MENU */}
+        {/* PROFILE + NOTIFICATIONS */}
         <div className="relative flex items-center gap-4">
-          <img
-            src={currentUser?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser?.full_name || currentUser?.username || 'User')}&background=10b981&color=fff`}
-            alt="Profile"
-            className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 object-cover"
-            onClick={() => navigate("/profile")}
-          />
+          <div className="relative">
+            <button 
+              onClick={() => setShowNotifications(!showNotifications)}
+              className="relative p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+            >
+              <Bell size={20} />
+              {unreadCount > 0 && (
+                <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+
+            {/* Notifications Dropdown */}
+            {showNotifications && (
+              <div className="absolute right-0 top-12 w-80 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-50 max-h-96 overflow-y-auto">
+                <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+                  <h3 className="font-semibold">Notifications</h3>
+                </div>
+                {notifications.length === 0 ? (
+                  <div className="p-4 text-center text-gray-500 dark:text-gray-400">No notifications</div>
+                ) : (
+                  notifications.map(notif => (
+                    <div key={notif.id} className={`p-4 border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 ${!notif.is_read ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex-1">
+                          <p className="text-sm text-gray-800 dark:text-gray-200">{notif.content}</p>
+                          <span className="text-xs text-gray-500 dark:text-gray-400 mt-1">{new Date(notif.created_at).toLocaleString()}</span>
+                        </div>
+                        <button 
+                          onClick={() => deleteNotification(notif.id)}
+                          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                      {notif.notification_type === 'friend_request' && notif.related_friendship_id && (
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={() => acceptFriendRequest(notif.actor_id)}
+                            className="flex-1 px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded text-xs font-medium transition"
+                          >
+                            Accept
+                          </button>
+                          <button
+                            onClick={() => rejectFriendRequest(notif.actor_id)}
+                            className="flex-1 px-3 py-1 bg-gray-300 dark:bg-gray-700 hover:bg-gray-400 dark:hover:bg-gray-600 text-gray-800 dark:text-white rounded text-xs font-medium transition"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
+                      {!notif.is_read && (
+                        <button 
+                          onClick={() => markNotificationAsRead(notif.id)}
+                          className="mt-2 text-xs text-emerald-600 dark:text-emerald-400 hover:underline"
+                        >
+                          Mark as read
+                        </button>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          
+          {currentUser?.avatar_url ? (
+            <img
+              src={resolveImageUrl(currentUser.avatar_url)}
+              alt="Profile"
+              className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 object-cover"
+              onClick={() => navigate("/profile")}
+            />
+          ) : (
+            <div 
+              onClick={() => navigate("/profile")}
+              className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 bg-gray-300 dark:bg-gray-700 flex items-center justify-center"
+            >
+              <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
+                {(currentUser?.full_name || currentUser?.username || 'U').charAt(0).toUpperCase()}
+              </span>
+            </div>
+          )}
         </div>
       </header>
 
@@ -131,7 +517,6 @@ export default function FeedPage() {
             <SidebarButton icon={<Home />} text="Feed" sidebarOpen={sidebarOpen} onClick={() => navigate("/feed")} />
             <SidebarButton icon={<Users />} text="Friends" sidebarOpen={sidebarOpen} />
             <SidebarButton icon={<Mail/>} text="Messages" sidebarOpen={sidebarOpen}onClick={() => navigate("/chat")} />
-            <SidebarButton icon={<Bell />} text="Notifications" sidebarOpen={sidebarOpen} />
           </div>
              
           <div>
@@ -153,12 +538,40 @@ export default function FeedPage() {
           className={`flex-1 p-6 transition-all duration-300 overflow-y-auto
             ${sidebarOpen ? "ml-64" : "ml-16"} mr-80`}
         >
-          <h2 className="text-3xl font-bold mb-6">Your Feed</h2>
+          <h2 className="text-3xl font-bold mb-6">
+            {searchQuery ? `Search Results for "${searchQuery}"` : "Your Feed"}
+          </h2>
+
+          {/* Create New Post */}
+          {!searchQuery && (
+            <form onSubmit={submitNewPost} className="mb-6 p-4 bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700">
+              <div className="mb-3">
+                <textarea
+                  value={newPostContent}
+                  onChange={(e) => setNewPostContent(e.target.value)}
+                  placeholder="What's on your mind?"
+                  className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2 min-h-24"
+                />
+              </div>
+              <div className="mb-3">
+                <input
+                  type="url"
+                  value={newPostImageUrl}
+                  onChange={(e) => setNewPostImageUrl(e.target.value)}
+                  placeholder="Optional image URL"
+                  className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2"
+                />
+              </div>
+              <div className="flex justify-end">
+                <button className="px-4 py-2 rounded-md bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer">Post</button>
+              </div>
+            </form>
+          )}
 
           {/* Loading State */}
           {loading && (
             <div className="text-center py-10">
-              <p className="text-gray-500 dark:text-gray-400">Loading profiles...</p>
+              <p className="text-gray-500 dark:text-gray-400">Loading feed...</p>
             </div>
           )}
 
@@ -169,59 +582,181 @@ export default function FeedPage() {
             </div>
           )}
 
-          {/* Profiles Feed */}
-          {!loading && !error && profiles.length === 0 && (
+          {/* Posts Feed or Search Results */}
+          {!loading && !error && (searchQuery ? searchResults : posts).length === 0 && (
             <div className="text-center py-10">
-              <p className="text-gray-500 dark:text-gray-400">No profiles found. Be the first to join!</p>
+              <p className="text-gray-500 dark:text-gray-400">
+                {searchQuery ? "No posts found." : "No posts yet. Create your first post!"}
+              </p>
             </div>
           )}
 
-          {!loading && !error && profiles.length > 0 && (
+          {!loading && !error && (searchQuery ? searchResults : posts).length > 0 && (
             <div className="space-y-6">
-              {profiles.map(profile => (
+              {(searchQuery ? searchResults : posts).map(post => (
                 <div
-                  key={profile.id}
+                  key={post.id}
                   className="relative p-6 bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700"
                 >
                   {/* HEADER */}
-                  <div className="flex items-center gap-4 mb-3">
-                    <img
-                      src={profile.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.full_name || profile.username)}&background=10b981&color=fff`}
-                      className="w-12 h-12 rounded-full border border-gray-300 dark:border-gray-700 object-cover"
-                      alt={profile.full_name || profile.username}
-                    />
-                    <div>
-                      <h3 className="font-semibold">{profile.full_name || profile.username}</h3>
-                      <span className="text-sm text-gray-500 dark:text-gray-400">@{profile.username}</span>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-4">
+                      {post.avatar_url ? (
+                        <img
+                          src={post.avatar_url}
+                          className="w-12 h-12 rounded-full border border-gray-300 dark:border-gray-700 object-cover cursor-pointer"
+                          alt={post.full_name || post.username}
+                          onClick={() => navigate(`/profile/${encodeURIComponent(post.user_id)}`)}
+                        />
+                      ) : (
+                        <div 
+                          onClick={() => navigate(`/profile/${encodeURIComponent(post.user_id)}`)}
+                          className="w-12 h-12 rounded-full border border-gray-300 dark:border-gray-700 bg-gray-300 dark:bg-gray-700 flex items-center justify-center cursor-pointer"
+                        >
+                          <span className="text-lg font-bold text-gray-600 dark:text-gray-400">
+                            {(post.full_name || post.username || 'U').charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
+                      <div
+                        className="cursor-pointer"
+                        onClick={() => navigate(`/profile/${encodeURIComponent(post.user_id)}`)}
+                      >
+                        <h3 className="font-semibold">{post.full_name || post.username}</h3>
+                        <span className="text-sm text-gray-500 dark:text-gray-400">@{post.username}</span>
+                      </div>
                     </div>
+                    {currentUser?.id === post.user_id && (
+                      <button 
+                        onClick={async () => {
+                          if (confirm("Delete this post?")) {
+                            try {
+                              await postAPI.deletePost(post.id);
+                              const feedPosts = await postAPI.getAllPosts();
+                              setPosts(Array.isArray(feedPosts) ? feedPosts : []);
+                            } catch (e) {
+                              console.error("Delete error:", e);
+                            }
+                          }
+                        }}
+                        className="text-gray-400 hover:text-red-500 transition"
+                      >
+                        ×
+                      </button>
+                    )}
                   </div>
 
                   {/* CONTENT */}
                   <div className="mt-2">
-                    <p className="text-gray-600 dark:text-gray-300">
-                      Member since {new Date(profile.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                    </p>
-                    {profile.role && (
-                      <span className="inline-block mt-2 px-3 py-1 text-xs font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-full">
-                        {profile.role}
-                      </span>
+                    <p className="text-gray-800 dark:text-gray-200">{post.content}</p>
+                    {post.image_url && (
+                      <img src={post.image_url} alt="post" className="mt-3 rounded-lg max-h-96 object-cover w-full" />
                     )}
+                    <div className="mt-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                      <span>Posted {new Date(post.created_at).toLocaleString()}</span>
+                      <div className="flex items-center gap-2">
+                        <Eye size={16} />
+                        <span>{post.view_count || 0} views</span>
+                      </div>
+                    </div>
                   </div>
 
                   {/* REACTIONS */}
                   <div className="flex items-center gap-6 mt-4 text-gray-500 dark:text-gray-400">
-                    <button className="flex items-center gap-1 hover:text-emerald-500 cursor-pointer transition">
-                      <Heart size={18} /> Like
+                    <button
+                      disabled={likeLoadingId === post.id}
+                      onClick={() => toggleLike(post.id, Boolean(post.user_liked))}
+                      className="flex items-center gap-1 hover:text-emerald-500 cursor-pointer transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Heart size={18} className={post.user_liked ? "text-emerald-500" : ""} />
+                      {post.user_liked ? "Unlike" : "Like"} ({post.likes_count || 0})
                     </button>
                     <button 
-                      onClick={() => navigate("/chat")}
+                      onClick={() => setExpandedPostId(expandedPostId === post.id ? null : post.id)}
                       className="flex items-center gap-1 hover:text-emerald-500 cursor-pointer transition"
                     >
-                      <MessageCircle size={18} /> Message
+                      <MessageCircle size={18} /> Comment ({post.comments_count || 0})
                     </button>
-                    <button className="flex items-center gap-1 hover:text-emerald-500 cursor-pointer transition">
-                      <Share2 size={18} /> Share
+                    <button 
+                      onClick={() => handleShare(post.id)}
+                      className="flex items-center gap-1 hover:text-emerald-500 cursor-pointer transition"
+                    >
+                      <Share2 size={18} /> Share ({post.shares_count || 0})
                     </button>
+                  </div>
+
+                  {/* COMMENTS */}
+                  <div className="mt-4 space-y-3">
+                    {expandedPostId === post.id && post.comments && post.comments.length > 0 && (
+                      <div className="space-y-2 mb-3 pl-4 border-l-2 border-gray-300 dark:border-gray-700">
+                        {post.comments.map(comment => (
+                          <div key={comment.id} className="text-sm">
+                            <div className="flex gap-2">
+                              {comment.avatar_url ? (
+                                <img 
+                                  src={resolveImageUrl(comment.avatar_url)}
+                                  alt={comment.username}
+                                  className="w-6 h-6 rounded-full"
+                                />
+                              ) : (
+                                <div className="w-6 h-6 rounded-full bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                                  <span className="text-xs font-bold text-gray-600 dark:text-gray-400">
+                                    {(comment.username || 'U').charAt(0).toUpperCase()}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="flex-1">
+                                <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">{comment.username}</p>
+                                <p className="text-gray-700 dark:text-gray-300">{comment.content}</p>
+                                <button 
+                                  onClick={() => setReplyingTo(comment.id)}
+                                  className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline mt-1"
+                                >
+                                  Reply
+                                </button>
+                                
+                                {replyingTo === comment.id && (
+                                  <div className="mt-2 flex gap-2">
+                                    <input 
+                                      type="text"
+                                      placeholder="Reply..."
+                                      value={replyText}
+                                      onChange={(e) => setReplyText(e.target.value)}
+                                      className="flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-2 py-1 text-sm"
+                                    />
+                                    <button 
+                                      onClick={() => handleReply(comment.id)}
+                                      className="px-2 py-1 rounded-md bg-emerald-500 text-white text-sm hover:bg-emerald-600 cursor-pointer"
+                                    >
+                                      Send
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        setReplyingTo(null);
+                                        setReplyText("");
+                                      }}
+                                      className="px-2 py-1 rounded-md bg-gray-300 dark:bg-gray-700 text-sm hover:bg-gray-400 cursor-pointer"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
+                    <form onSubmit={submitComment} className="flex items-center gap-2">
+                      <input
+                        className="flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-3 py-2"
+                        placeholder="Write a comment..."
+                        value={commentPostId === post.id ? commentText : ""}
+                        onChange={(e) => { setCommentPostId(post.id); setCommentText(e.target.value); }}
+                      />
+                      <button className="px-3 py-2 rounded-md bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer">Comment</button>
+                    </form>
                   </div>
                 </div>
               ))}
@@ -230,38 +765,155 @@ export default function FeedPage() {
         </main>
 
         {/* RIGHT SIDEBAR */}
-        <aside className="fixed top-16 right-0 h-[calc(100vh-4rem)] w-80 bg-white dark:bg-gray-950 border-l border-gray-200 dark:border-gray-900 p-4 flex flex-col">
-          <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Friend Suggestions</h3>
-          
-          <div className="space-y-3 overflow-y-auto">
-            {loading ? (
-              <p className="text-center text-gray-500 dark:text-gray-400">Loading...</p>
-            ) : friendSuggestions.length === 0 ? (
-              <p className="text-center text-gray-500 dark:text-gray-400">No suggestions yet</p>
-            ) : (
-              friendSuggestions.map((profile) => (
-                <div key={profile.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">
-                  <div className="flex items-center gap-3 flex-1">
-                    <img
-                      src={profile.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.full_name || profile.username)}&background=10b981&color=fff`}
-                      className="w-10 h-10 rounded-full border border-emerald-500 object-cover"
-                      alt={profile.full_name || profile.username}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
-                        {profile.full_name || profile.username}
-                      </h4>
-                      <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
-                        @{profile.username}
-                      </p>
+        <aside className="fixed top-16 right-0 h-[calc(100vh-4rem)] w-80 bg-white dark:bg-gray-950 border-l border-gray-200 dark:border-gray-900 p-4 flex flex-col gap-6">
+          {/* My Friends */}
+          <div>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-3">My Friends</h3>
+            <div className="space-y-3 max-h-[40vh] overflow-y-auto">
+              {loading ? (
+                <p className="text-center text-gray-500 dark:text-gray-400">Loading...</p>
+              ) : myFriends.length === 0 ? (
+                <p className="text-center text-gray-500 dark:text-gray-400">No friends yet</p>
+              ) : (
+                myFriends.map((f) => (
+                  <div key={f.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                    <div className="flex items-center gap-3 flex-1">
+                      {f.avatar_url ? (
+                        <img
+                          src={resolveImageUrl(f.avatar_url)}
+                          className="w-9 h-9 rounded-full border border-emerald-500 object-cover"
+                          alt={f.full_name || f.username || "Friend"}
+                        />
+                      ) : (
+                        <div className="w-9 h-9 rounded-full border border-emerald-500 bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                          <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
+                            {(f.full_name || f.username || 'F').charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                          {f.full_name || f.username}
+                        </h4>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 truncate">@{f.username}</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => navigate(`/chat?with=${encodeURIComponent(f.id)}`)}
+                      className="p-1.5 rounded-full hover:bg-emerald-500/20 text-emerald-500 transition cursor-pointer shrink-0"
+                      aria-label="Message"
+                    >
+                      <MessageCircle size={18} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Incoming Friend Requests */}
+          {incomingRequests.length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-3">Friend Requests</h3>
+              <div className="space-y-3">
+                {incomingRequests.map((request) => (
+                  <div key={request.requester_id} className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                    <div className="flex items-center gap-3 mb-2">
+                      {request.requester_avatar_url ? (
+                        <img
+                          src={request.requester_avatar_url}
+                          className="w-10 h-10 rounded-full border border-emerald-500 object-cover"
+                          alt={request.requester_full_name || request.requester_username}
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full border border-emerald-500 bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                          <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
+                            {(request.requester_full_name || request.requester_username || 'U').charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                          {request.requester_full_name || request.requester_username}
+                        </h4>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
+                          @{request.requester_username}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => acceptFriendRequest(request.requester_id)}
+                        className="flex-1 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-md text-sm font-medium transition"
+                      >
+                        Accept
+                      </button>
+                      <button
+                        onClick={() => rejectFriendRequest(request.requester_id)}
+                        className="flex-1 px-3 py-1.5 bg-gray-300 dark:bg-gray-700 hover:bg-gray-400 dark:hover:bg-gray-600 text-gray-800 dark:text-white rounded-md text-sm font-medium transition"
+                      >
+                        Reject
+                      </button>
                     </div>
                   </div>
-                  <button className="p-1.5 rounded-full hover:bg-emerald-500/20 text-emerald-500 transition cursor-pointer shrink-0">
-                    <Plus size={18} />
-                  </button>
-                </div>
-              ))
-            )}
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Friend Suggestions */}
+          <div>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-3">Friend Suggestions</h3>
+            <div className="space-y-3 max-h-[40vh] overflow-y-auto">
+              {loading ? (
+                <p className="text-center text-gray-500 dark:text-gray-400">Loading...</p>
+              ) : filteredSuggestions.length === 0 ? (
+                <p className="text-center text-gray-500 dark:text-gray-400">No suggestions yet</p>
+              ) : (
+                filteredSuggestions.map((profile) => (
+                  <div key={profile.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                    <div className="flex items-center gap-3 flex-1">
+                      {profile.avatar_url ? (
+                        <img
+                          src={resolveImageUrl(profile.avatar_url)}
+                          className="w-10 h-10 rounded-full border border-emerald-500 object-cover"
+                          alt={profile.full_name || profile.username}
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full border border-emerald-500 bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                          <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
+                            {(profile.full_name || profile.username || 'U').charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <h4 className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                          {profile.full_name || profile.username}
+                        </h4>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
+                          @{profile.username}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => sendRequest(profile.id)}
+                      disabled={profile.pending}
+                      className={`p-1.5 rounded-full transition cursor-pointer shrink-0 border ${
+                        profile.pending
+                          ? "bg-gray-200 dark:bg-gray-700 text-gray-500 border-transparent cursor-not-allowed"
+                          : "hover:bg-emerald-500/20 text-emerald-500 border-transparent"
+                      }`}
+                    >
+                      {profile.pending ? (
+                        <span className="text-xs font-semibold">Pending</span>
+                      ) : (
+                        <Plus size={18} />
+                      )}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </aside>
       </div>

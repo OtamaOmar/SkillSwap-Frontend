@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Menu, Search, Users, LogOut, Mail, Bell, Edit, Camera, MapPin, Calendar, Award, Home, Heart, MessageCircle, Share2, Send } from "lucide-react";
-import { userAPI } from "../services/api";
+import { Menu, Search, Users, LogOut, Mail, Edit, Camera, MapPin, Calendar, Award, Home, Heart, MessageCircle, Share2, Send, Trash2, Eye } from "lucide-react";
+import { userAPI, postAPI, friendshipsAPI } from "../services/api";
 import LoadingSpinner from "../components/LoadingSpinner";
 
 export default function ProfilePage() {
@@ -9,7 +9,6 @@ export default function ProfilePage() {
   const { id } = useParams(); // Get user ID from URL if viewing another user's profile
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode] = useState(localStorage.getItem("theme") === "dark");
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
@@ -30,6 +29,37 @@ export default function ProfilePage() {
     location: "",
     country: ""
   });
+  const [requestingFriend, setRequestingFriend] = useState(false);
+  const [requestFeedback, setRequestFeedback] = useState("");
+  const [relationship, setRelationship] = useState("none"); // none | pending_outgoing | pending_incoming | accepted
+  const [actionLoading, setActionLoading] = useState(false);
+
+  // Helpers to keep derived counts in sync when backend stats are missing/stale
+  const loadMyFriendsCount = useCallback(async () => {
+    try {
+      const connections = await friendshipsAPI.getMyFriendships();
+      const friendsCount = Array.isArray(connections?.connections)
+        ? connections.connections.length
+        : 0;
+
+      setProfile((prev) => {
+        if (!prev) return prev;
+        const currentFriends = Number(prev.stats?.friends || 0);
+        if (friendsCount !== currentFriends) {
+          return {
+            ...prev,
+            stats: {
+              ...(prev.stats || {}),
+              friends: friendsCount,
+            },
+          };
+        }
+        return prev;
+      });
+    } catch (error) {
+      console.error("Failed to load friends count:", error);
+    }
+  }, []);
 
   // DARK MODE
   useEffect(() => {
@@ -68,6 +98,40 @@ export default function ProfilePage() {
 
       // Load user posts
       loadUserPosts(userId);
+
+      // Ensure friends count for own profile when backend stats are missing/stale
+      if (!id) {
+        loadMyFriendsCount();
+      }
+
+      // If viewing another user's profile, determine relationship status
+      if (id) {
+        try {
+          const connectionsRes = await friendshipsAPI.getMyFriendships();
+          const isFriend = Array.isArray(connectionsRes?.connections)
+            && connectionsRes.connections.some(c => String(c?.user?.id) === String(id));
+          if (isFriend) {
+            setRelationship("accepted");
+          } else {
+            const outgoingRes = await friendshipsAPI.getOutgoingRequests();
+            const isPendingOutgoing = Array.isArray(outgoingRes?.requests)
+              && outgoingRes.requests.some(r => String(r?.target_id) === String(id));
+            if (isPendingOutgoing) {
+              setRelationship("pending_outgoing");
+            } else {
+              const incomingRes = await friendshipsAPI.getIncomingRequests();
+              const isPendingIncoming = Array.isArray(incomingRes?.requests)
+                && incomingRes.requests.some(r => String(r?.requester_id) === String(id));
+              setRelationship(isPendingIncoming ? "pending_incoming" : "none");
+            }
+          }
+        } catch (relErr) {
+          console.warn("Failed to compute relationship status:", relErr?.message || relErr);
+          setRelationship("none");
+        }
+      } else {
+        setRelationship("accepted"); // own profile
+      }
     } catch (error) {
       console.error("Failed to load profile:", error);
       if (error.message.includes('token')) {
@@ -76,7 +140,7 @@ export default function ProfilePage() {
     } finally {
       setLoading(false);
     }
-  }, [id, navigate]);
+  }, [id, navigate, loadMyFriendsCount]);
 
   useEffect(() => {
     loadProfile();
@@ -89,6 +153,23 @@ export default function ProfilePage() {
       setLoadingPosts(true);
       const posts = await userAPI.getUserPosts(userId);
       setUserPosts(posts);
+
+      // If backend didn't return stats for the current profile, derive post count from fetched posts.
+      setProfile((prev) => {
+        if (!prev) return prev;
+        const derivedPosts = Array.isArray(posts) ? posts.length : 0;
+        const currentPosts = Number(prev.stats?.posts || 0);
+        if (derivedPosts > 0 && derivedPosts !== currentPosts) {
+          return {
+            ...prev,
+            stats: {
+              ...(prev.stats || {}),
+              posts: derivedPosts,
+            },
+          };
+        }
+        return prev;
+      });
     } catch (error) {
       console.error("Failed to load user posts:", error);
       setUserPosts([]);
@@ -132,12 +213,9 @@ export default function ProfilePage() {
 
     try {
       setUploadingImage(true);
-      const result = await userAPI.uploadProfilePicture(file);
-      setProfile(result.user);
-      // Update localStorage
-      const savedUser = JSON.parse(localStorage.getItem('user') || '{}');
-      savedUser.profile_picture = result.user.profile_picture;
-      localStorage.setItem('user', JSON.stringify(savedUser));
+      await userAPI.uploadProfilePicture(file);
+      // Reload profile to reflect the updated avatar
+      await loadProfile();
     } catch (error) {
       console.error("Failed to upload image:", error);
       alert("Failed to upload profile picture");
@@ -171,8 +249,9 @@ export default function ProfilePage() {
 
     try {
       setUploadingCover(true);
-      const result = await userAPI.uploadCoverImage(file);
-      setProfile(result.user);
+      await userAPI.uploadCoverImage(file);
+      // Reload profile to reflect the updated cover
+      await loadProfile();
     } catch (error) {
       console.error("Failed to upload cover:", error);
       alert("Failed to upload cover image");
@@ -187,9 +266,66 @@ export default function ProfilePage() {
     navigate('/login');
   };
 
+  const handleSendFriendRequest = async () => {
+    if (!id) return;
+    try {
+      setRequestFeedback("");
+      setRequestingFriend(true);
+      await friendshipsAPI.sendFriendRequest(id);
+      setRequestFeedback("Friend request sent");
+      setRelationship("pending_outgoing");
+    } catch (e) {
+      const msg = e?.message || "Failed to send request";
+      setRequestFeedback(msg);
+    } finally {
+      setRequestingFriend(false);
+    }
+  };
 
+  const handleAcceptFriendRequest = async () => {
+    if (!id) return;
+    try {
+      setActionLoading(true);
+      setRequestFeedback("");
+      await friendshipsAPI.acceptFriendRequest(id);
+      setRelationship("accepted");
+      setRequestFeedback("Friend request accepted");
+    } catch (e) {
+      setRequestFeedback(e?.message || "Failed to accept request");
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
+  const handleRejectFriendRequest = async () => {
+    if (!id) return;
+    try {
+      setActionLoading(true);
+      setRequestFeedback("");
+      await friendshipsAPI.rejectFriendRequest(id);
+      setRelationship("none");
+      setRequestFeedback("Friend request rejected");
+    } catch (e) {
+      setRequestFeedback(e?.message || "Failed to reject request");
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
+  const handleUnfriend = async () => {
+    if (!id) return;
+    try {
+      setActionLoading(true);
+      setRequestFeedback("");
+      await friendshipsAPI.unfriend(id);
+      setRelationship("none");
+      setRequestFeedback("Unfriended");
+    } catch (e) {
+      setRequestFeedback(e?.message || "Failed to unfriend");
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   const handleAddSkill = async () => {
     if (!newSkill.trim()) return;
@@ -276,37 +412,8 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* PROFILE + MENU */}
-        <div className="relative flex items-center gap-4">
-          <img
-            src={profile?.profile_picture ? `http://localhost:4000${profile.profile_picture}` : "https://i.pravatar.cc/40"}
-            alt="Profile"
-            className="w-10 h-10 rounded-full cursor-pointer border border-gray-300 dark:border-gray-700 object-cover"
-            onClick={() => setSettingsOpen(!settingsOpen)}
-          />
-
-          {/* Dropdown */}
-          <div
-            className={`
-              absolute right-0 top-14 w-48 p-2 rounded-lg shadow-xl
-              bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700
-              transform transition-all duration-200 origin-top-right
-              ${settingsOpen
-                ? "opacity-100 scale-100 translate-y-0"
-                : "opacity-0 scale-95 -translate-y-2 pointer-events-none"}
-            `}
-          >
-            <button className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md cursor-pointer">
-              Profile Settings
-            </button>
-            <button className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md cursor-pointer">
-              Account
-            </button>
-            <button className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md cursor-pointer">
-              Help Center
-            </button>
-          </div>
-        </div>
+        {/* PROFILE + MENU hidden on profile page */}
+        <div className="relative flex items-center gap-4" />
       </header>
 
       {/* MAIN CONTENT WRAPPER */}
@@ -325,7 +432,6 @@ export default function ProfilePage() {
             <SidebarButton icon={<Home />} text="Feed" sidebarOpen={sidebarOpen} onClick={() => navigate("/feed")} />
             <SidebarButton icon={<Users />} text="Friends" sidebarOpen={sidebarOpen} />
             <SidebarButton icon={<Mail />} text="Messages" sidebarOpen={sidebarOpen} />
-            <SidebarButton icon={<Bell />} text="Notifications" sidebarOpen={sidebarOpen} />
           </div>
 
           <div>
@@ -347,12 +453,12 @@ export default function ProfilePage() {
           <div className="max-w-4xl mx-auto">
             {/* Cover Image */}
             <div 
-              className="relative h-48 bg-linear-to-r from-emerald-500 to-teal-600 rounded-xl mb-20 overflow-hidden"
-              style={{
-                backgroundImage: profile.cover_image ? `url(http://localhost:4000${profile.cover_image})` : undefined,
+              className="relative h-48 rounded-xl mb-20 overflow-visible bg-gray-200 dark:bg-gray-800"
+              style={profile.cover_image_url ? {
+                backgroundImage: `url(${profile.cover_image_url})`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center'
-              }}
+              } : {}}
             >
               {isOwnProfile && (
                 <>
@@ -380,11 +486,19 @@ export default function ProfilePage() {
               {/* Profile Picture */}
               <div className="absolute -bottom-16 left-8">
                 <div className="relative">
-                  <img
-                    src={profile.profile_picture ? `http://localhost:4000${profile.profile_picture}` : "https://i.pravatar.cc/150"}
-                    alt="Profile"
-                    className="w-32 h-32 rounded-full border-4 border-white dark:border-gray-900 object-cover"
-                  />
+                  {profile.avatar_url ? (
+                    <img
+                      src={profile.avatar_url}
+                      alt="Profile"
+                      className="w-32 h-32 rounded-full border-4 border-white dark:border-gray-900 object-cover"
+                    />
+                  ) : (
+                    <div className="w-32 h-32 rounded-full border-4 border-white dark:border-gray-900 bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                      <span className="text-4xl font-bold text-gray-600 dark:text-gray-400">
+                        {(profile.full_name || profile.username || 'U').charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                  )}
                   {isOwnProfile && (
                     <>
                       <input
@@ -428,7 +542,7 @@ export default function ProfilePage() {
                   )}
                   <p className="text-gray-500 dark:text-gray-400">@{profile.username}</p>
                 </div>
-                {isOwnProfile && (
+                {isOwnProfile ? (
                   <button
                     onClick={isEditing ? handleSaveProfile : () => setIsEditing(true)}
                     className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition cursor-pointer"
@@ -436,8 +550,72 @@ export default function ProfilePage() {
                     <Edit size={18} />
                     {isEditing ? "Save Profile" : "Edit Profile"}
                   </button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    {relationship === "none" && (
+                      <button
+                        onClick={handleSendFriendRequest}
+                        disabled={requestingFriend}
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Users size={18} />
+                        {requestingFriend ? "Sending..." : "Add Friend"}
+                      </button>
+                    )}
+
+                    {relationship === "pending_outgoing" && (
+                      <button
+                        disabled
+                        className="flex items-center gap-2 px-4 py-2 bg-gray-300 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg cursor-not-allowed"
+                      >
+                        Pending
+                      </button>
+                    )}
+
+                    {relationship === "pending_incoming" && (
+                      <>
+                        <button
+                          onClick={handleAcceptFriendRequest}
+                          disabled={actionLoading}
+                          className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Accept
+                        </button>
+                        <button
+                          onClick={handleRejectFriendRequest}
+                          disabled={actionLoading}
+                          className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Reject
+                        </button>
+                      </>
+                    )}
+
+                    {relationship === "accepted" && (
+                      <>
+                        <button
+                          onClick={() => navigate(`/chat?with=${encodeURIComponent(id)}`)}
+                          className="flex items-center gap-2 px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 rounded-lg transition cursor-pointer"
+                        >
+                          <MessageCircle size={18} />
+                          Message
+                        </button>
+                        <button
+                          onClick={handleUnfriend}
+                          disabled={actionLoading}
+                          className="flex items-center gap-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Unfriend
+                        </button>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
+
+                {requestFeedback && !isOwnProfile && (
+                  <div className="mb-4 text-sm text-emerald-600 dark:text-emerald-400">{requestFeedback}</div>
+                )}
 
               {/* Bio */}
               {isEditing ? (
@@ -481,12 +659,8 @@ export default function ProfilePage() {
                   <p className="text-sm text-gray-500 dark:text-gray-400">Posts</p>
                 </div>
                 <div className="text-center cursor-pointer hover:opacity-80 transition">
-                  <p className="text-2xl font-bold text-emerald-600">{profile.stats?.followers || 0}</p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Followers</p>
-                </div>
-                <div className="text-center cursor-pointer hover:opacity-80 transition">
-                  <p className="text-2xl font-bold text-emerald-600">{profile.stats?.following || 0}</p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Following</p>
+                  <p className="text-2xl font-bold text-emerald-600">{profile.stats?.friends || 0}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Friends</p>
                 </div>
               </div>
 
@@ -587,11 +761,19 @@ export default function ProfilePage() {
                         className="p-6 bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700"
                       >
                         <div className="flex items-center gap-4 mb-3">
-                          <img
-                            src={post.profile_picture ? `http://localhost:4000${post.profile_picture}` : "https://i.pravatar.cc/40"}
-                            className="w-10 h-10 rounded-full border border-gray-300 dark:border-gray-700 object-cover"
-                            alt={post.username}
-                          />
+                          {post.avatar_url ? (
+                            <img
+                              src={post.avatar_url}
+                              className="w-10 h-10 rounded-full border border-gray-300 dark:border-gray-700 object-cover"
+                              alt={post.username}
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full border border-gray-300 dark:border-gray-700 bg-gray-300 dark:bg-gray-700 flex items-center justify-center">
+                              <span className="text-sm font-bold text-gray-600 dark:text-gray-400">
+                                {(post.full_name || post.username || 'U').charAt(0).toUpperCase()}
+                              </span>
+                            </div>
+                          )}
                           <div>
                             <h4 className="font-semibold">{post.full_name || post.username}</h4>
                             <span className="text-sm text-gray-500 dark:text-gray-400">
@@ -615,9 +797,43 @@ export default function ProfilePage() {
                           <button className="flex items-center gap-1 hover:text-blue-500 transition">
                             <MessageCircle size={18} /> <span>{post.comments_count || 0}</span>
                           </button>
-                          <button className="flex items-center gap-1 hover:text-green-500 transition">
+                          <button 
+                            onClick={async () => {
+                              try {
+                                await postAPI.sharePost(post.id);
+                                // Reload posts to update count
+                                const posts = await userAPI.getUserPosts(post.user_id);
+                                setUserPosts(posts);
+                              } catch (e) {
+                                console.error("Share error:", e);
+                              }
+                            }}
+                            className="flex items-center gap-1 hover:text-green-500 transition"
+                          >
                             <Share2 size={18} /> <span>{post.shares_count || 0}</span>
                           </button>
+                          <div className="flex items-center gap-1 text-gray-500">
+                            <Eye size={18} /> <span>{post.view_count || 0}</span>
+                          </div>
+                          {isOwnProfile && (
+                            <button 
+                              onClick={async () => {
+                                if (confirm("Delete this post?")) {
+                                  try {
+                                    await postAPI.deletePost(post.id);
+                                    // Reload posts
+                                    const posts = await userAPI.getUserPosts(profile.id);
+                                    setUserPosts(posts);
+                                  } catch (e) {
+                                    console.error("Delete error:", e);
+                                  }
+                                }
+                              }}
+                              className="flex items-center gap-1 hover:text-red-600 transition ml-auto"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}

@@ -85,7 +85,7 @@ axiosInstance.interceptors.response.use(
   }
 );
 
-// Register user (Supabase)
+// Register user (JWT auth)
 export const registerUser = async (username, email, password, full_name) => {
   try {
     const response = await axios.post(`${AUTH_URL}/signup`, {
@@ -112,7 +112,7 @@ export const registerUser = async (username, email, password, full_name) => {
   }
 };
 
-// Login user (Supabase)
+// Login user (JWT auth)
 export const loginUser = async (email, password) => {
   try {
     const response = await axios.post(`${AUTH_URL}/login`, {
@@ -223,20 +223,29 @@ export const userAPI = {
   },
 
   uploadProfilePicture: async (file) => {
-    const formData = new FormData();
-    formData.append("profile_picture", file);
-    const response = await axiosInstance.post(`${API_URL}/users/upload/profile-picture`, formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
+    // For now, using a placeholder URL. In production, upload to cloud storage first.
+    const avatar_url = typeof file === 'string' ? file : URL.createObjectURL(file);
+    const response = await axiosInstance.post(`${API_URL}/users/upload/profile-picture`, { avatar_url });
     return response.data;
   },
 
   uploadCoverImage: async (file) => {
-    const formData = new FormData();
-    formData.append("cover_image", file);
-    const response = await axiosInstance.post(`${API_URL}/users/upload/cover-image`, formData, {
-      headers: { "Content-Type": "multipart/form-data" },
+    // For now, using a placeholder URL. In production, upload to cloud storage first.
+    const cover_image_url = typeof file === 'string' ? file : URL.createObjectURL(file);
+    const response = await axiosInstance.post(`${API_URL}/users/upload/cover-image`, { cover_image_url });
+    return response.data;
+  },
+
+  addSkill: async (skillName, skillType) => {
+    const response = await axiosInstance.post(`${API_URL}/users/skills`, {
+      skill_name: skillName,
+      skill_type: skillType,
     });
+    return response.data;
+  },
+
+  deleteSkill: async (skillId) => {
+    const response = await axiosInstance.delete(`${API_URL}/users/skills/${skillId}`);
     return response.data;
   },
 };
@@ -282,6 +291,118 @@ export const postAPI = {
     const response = await axiosInstance.delete(`${API_URL}/posts/${postId}/like`);
     return response.data;
   },
+
+  deletePost: async (postId) => {
+    const response = await axiosInstance.delete(`${API_URL}/posts/${postId}`);
+    return response.data;
+  },
+
+  deleteComment: async (commentId) => {
+    const response = await axiosInstance.delete(`${API_URL}/comments/${commentId}`);
+    return response.data;
+  },
+
+  sharePost: async (postId) => {
+    const response = await axiosInstance.post(`${API_URL}/posts/${postId}/share`);
+    return response.data;
+  },
+
+  incrementViewCount: async (postId) => {
+    const response = await axiosInstance.post(`${API_URL}/posts/${postId}/view`);
+    return response.data;
+  },
+
+  addCommentReply: async (parentCommentId, content) => {
+    const response = await axiosInstance.post(
+      `${API_URL}/comments/${parentCommentId}/replies`,
+      { content }
+    );
+    return response.data;
+  },
+
+  searchPosts: async (query, limit = 20) => {
+    const response = await axiosInstance.get(`${API_URL}/posts/search`, {
+      params: { q: query, limit },
+    });
+    return response.data;
+  },
+};
+
+// NOTIFICATIONS API OBJECT
+export const notificationsAPI = {
+  getNotifications: async (limit = 20, offset = 0) => {
+    const response = await axiosInstance.get(`${API_URL}/notifications`, {
+      params: { limit, offset },
+    });
+    return response.data;
+  },
+
+  getUnreadCount: async () => {
+    const response = await axiosInstance.get(`${API_URL}/notifications/unread-count`);
+    return response.data;
+  },
+
+  markAsRead: async (notificationId) => {
+    const response = await axiosInstance.put(
+      `${API_URL}/notifications/${notificationId}/read`
+    );
+    return response.data;
+  },
+
+  markAllAsRead: async () => {
+    const response = await axiosInstance.put(`${API_URL}/notifications/mark-all-read`);
+    return response.data;
+  },
+
+  deleteNotification: async (notificationId) => {
+    const response = await axiosInstance.delete(`${API_URL}/notifications/${notificationId}`);
+    return response.data;
+  },
+};
+
+// MESSAGES API OBJECT
+export const messagesAPI = {
+  // Send a message to another user
+  sendMessage: async (toUserId, content) => {
+    const response = await axiosInstance.post(`${API_URL}/chat/messages`, {
+      toUserId,
+      content,
+    });
+    return response.data;
+  },
+
+  // Get chat history with a specific user
+  getConversation: async (userId) => {
+    const response = await axiosInstance.get(`${API_URL}/chat/with/${userId}`);
+    return response.data;
+  },
+
+  // Get all conversations (list of people you've chatted with)
+  getAllConversations: async () => {
+    const response = await axiosInstance.get(`${API_URL}/chat/conversations`);
+    return response.data;
+  },
+
+  // Mark messages from a user as read
+  markConversationAsRead: async (userId) => {
+    const response = await axiosInstance.patch(`${API_URL}/chat/with/${userId}/read`);
+    return response.data;
+  },
+
+  // Get real-time stream
+  subscribeToMessages: async () => {
+    return new EventSource(`${API_URL}/chat/stream`, { withCredentials: true });
+  },
+};
+
+// SEARCH API OBJECT
+export const searchAPI = {
+  searchPosts: async (query, limit = 20) => {
+    const response = await axiosInstance.get(`${API_URL}/posts/search`, {
+      params: { q: query, limit },
+    });
+    return response.data;
+  },
 };
 
 // SKILLS API OBJECT
@@ -320,30 +441,67 @@ export const skillsAPI = {
 
 // FRIENDSHIPS API OBJECT
 export const friendshipsAPI = {
+  // Accepted connections list
   getMyFriendships: async () => {
     const response = await axiosInstance.get(`${API_URL}/friendships`);
     return response.data;
   },
 
-  sendFriendRequest: async (friendId) => {
+  // Alias for getMyFriendships for compatibility
+  getConnections: async () => {
+    const response = await axiosInstance.get(`${API_URL}/friendships`);
+    return response.data;
+  },
+
+  // Send friend request to other user id
+  sendFriendRequest: async (toUserId) => {
     const response = await axiosInstance.post(`${API_URL}/friendships/request`, {
-      friend_id: friendId,
+      toUserId,
     });
     return response.data;
   },
 
-  acceptFriendRequest: async (friendshipId) => {
-    const response = await axiosInstance.put(`${API_URL}/friendships/${friendshipId}/accept`);
+  // Pending requests directed to me
+  getIncomingRequests: async () => {
+    const response = await axiosInstance.get(`${API_URL}/friendships/requests/incoming`);
     return response.data;
   },
 
-  rejectFriendRequest: async (friendshipId) => {
-    const response = await axiosInstance.delete(`${API_URL}/friendships/${friendshipId}/reject`);
+  // Requests I have sent
+  getOutgoingRequests: async () => {
+    const response = await axiosInstance.get(`${API_URL}/friendships/requests/outgoing`);
     return response.data;
   },
 
-  unfriend: async (friendId) => {
-    const response = await axiosInstance.delete(`${API_URL}/friendships/${friendId}`);
+  // Accept a request from other user
+  acceptFriendRequest: async (otherUserId) => {
+    const response = await axiosInstance.patch(`${API_URL}/friendships/requests/${otherUserId}/accept`);
+    return response.data;
+  },
+
+  // Reject a request from other user
+  rejectFriendRequest: async (otherUserId) => {
+    const response = await axiosInstance.patch(`${API_URL}/friendships/requests/${otherUserId}/reject`);
+    return response.data;
+  },
+
+  // Remove friendship or cancel pending
+  unfriend: async (otherUserId) => {
+    const response = await axiosInstance.delete(`${API_URL}/friendships/${otherUserId}`);
+    return response.data;
+  },
+
+  // Friend suggestions
+  getSuggestions: async (limit = 20, offset = 0) => {
+    const response = await axiosInstance.get(`${API_URL}/friendships/suggestions`, {
+      params: { limit, offset },
+    });
+    return response.data;
+  },
+
+  // Get friendship status with another user
+  getFriendshipStatus: async (otherUserId) => {
+    const response = await axiosInstance.get(`${API_URL}/friendships/status/${otherUserId}`);
     return response.data;
   },
 };
