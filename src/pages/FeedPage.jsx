@@ -33,7 +33,7 @@ export default function FeedPage() {
   const resolveImageUrl = (url) => {
     if (!url) return null;
     if (/^https?:\/\//i.test(url)) return url;
-    const base = import.meta.env?.VITE_API_BASE_URL || "http://localhost:4000";
+    const base = import.meta.env?.VITE_API_BASE_URL || "/api";
     // Ensure single slash join
     if (url.startsWith("/")) return `${base}${url}`;
     return `${base}/${url}`;
