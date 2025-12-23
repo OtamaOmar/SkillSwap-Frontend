@@ -784,7 +784,7 @@ export default function ProfilePage() {
                         <p className="text-gray-700 dark:text-gray-300 mb-3">{post.content}</p>
                         {post.image_url && (
                           <img
-                            src={`http://localhost:4000${post.image_url}`}
+                            src={`/api${post.image_url}`}
                             alt="Post"
                             className="w-full rounded-lg mb-3"
                           />

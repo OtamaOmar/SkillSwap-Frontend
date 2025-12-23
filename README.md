@@ -1,86 +1,64 @@
 # SkillSwap Frontend (Vite + React)
 
-Runs against the SkillSwap backend on port 4000 and serves the SPA over Nginx. Default host port is 8000.
+React SPA for SkillSwap. Authenticates with the backend via JWT, uses axios interceptors for token refresh, and ships with Tailwind-ready styles. Live at http://skillswap-app.duckdns.org/ (frontend served from a container running on our Azure server).
+
+## Stack
+- Vite + React 19 + React Router
+- Axios with auth interceptors
+- Tailwind-ready PostCSS pipeline
+
+## Getting started (local)
+1) Install deps
+```bash
+npm install
+```
+2) Set env (optional) in `.env`
+```
+VITE_API_BASE_URL=http://localhost:4000
+```
+If omitted, the app uses relative `/api` paths (useful when served behind the same origin/nginx).
+3) Run dev server
+```bash
+npm run dev
+# http://localhost:5173
+```
+4) Production build/preview
+```bash
+npm run build
+npm run preview
+```
+
+## API base URL rules
+- With `VITE_API_BASE_URL`: requests go to `${VITE_API_BASE_URL}/api`.
+- Without it: requests hit `/api` so an nginx or dev proxy should forward to the backend.
 
 ## Docker
-
-- Build the image
-
+- Build and run the SPA image
 ```bash
 docker build -t skillswap-frontend:latest .
-```
-
-- Run with Docker
-
-```bash
 docker run --rm -p 8000:80 skillswap-frontend:latest
 ```
-
-- Run with Docker Compose
-
-```bash
-docker compose up --build
-# Visit http://localhost:8000
-```
-
-Notes:
-- The container serves the built app via Nginx.
-- SPA routing is configured to fallback to index.html.
+- Full stack: from repo root run `docker compose up --build` to start frontend (8000), backend (4000), and Postgres (5432). Inside the network the frontend reaches the API at `http://backend:4000`.
 
 ## CI/CD
+- CI: `.github/workflows/frontend-ci.yml` installs, lints, and builds on pushes/PRs.
+- CD: `.github/workflows/frontend-cd.yml` builds and deploys to Railway; set `RAILWAY_TOKEN`, `RAILWAY_PROJECT_ID`, `RAILWAY_FRONTEND_SERVICE`, and `VITE_API_BASE_URL` secrets.
 
-- CI workflow: .github/workflows/ci.yml
-	- Installs dependencies, runs lint, and builds on pushes/PRs to main.
-	- Also performs a Docker build test (no push) to validate Dockerfile.
-
-- Docker publish: .github/workflows/docker-publish.yml
-	- Builds and pushes the image to GitHub Container Registry (GHCR) on version tags like v1.2.3.
-	- Images are published to ghcr.io/<org-or-user>/skillswap-frontend with latest and version tags.
-	- No extra secrets are required; uses GITHUB_TOKEN with packages: write permissions.
-
-### Tagging for releases
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
+## Project layout
+```
+SkillSwap-Frontend/
+├─ src/
+│  ├─ pages/           # Chat, feed, auth, profile
+│  ├─ components/      # Loading spinner, ProtectedRoute
+│  ├─ services/api.js  # Axios instance + API helpers
+│  ├─ App.jsx          # Routes
+│  └─ main.jsx         # React entry
+├─ public/
+├─ Dockerfile
+└─ vite.config.js
 ```
 
-### Consuming the image
-
-```bash
-docker pull ghcr.io/<org-or-user>/skillswap-frontend:latest
-docker run -p 8080:80 ghcr.io/<org-or-user>/skillswap-frontend:latest
-```
-
-## Full-stack with Docker Compose
-
-This compose file runs the frontend, backend, and PostgreSQL together.
-
-- Services:
-	- `frontend`: Nginx serving the built React app, expects `VITE_API_BASE_URL`.
-	- `backend`: Node API (image placeholder `otamaomar/skillswap-backend:latest` or build from local backend repo).
-	- `db`: PostgreSQL with default credentials in the compose file.
-
-### Configure
-
-1. Copy `.env.example` to `.env` and adjust values if needed.
-2. If you want to build the backend locally, edit `docker-compose.yml` to enable the `build:` section and set the correct backend path.
-
-### Run
-
-```bash
-docker compose up --build
-# Frontend: http://localhost:8000
-# Backend:  http://localhost:4000
-# Postgres: localhost:5432 (user: mora, password: Omar.2005, db: skillswap_db)
-```
-
-The frontend talks to the backend via `http://backend:4000` inside the Docker network and `http://localhost:4000` from your host.
-
-Compose builds the backend from the local repo at `/home/mora/github/SkillSwap-Backend` using its `Dockerfile`. Ensure the backend Dockerfile binds to `PORT=4000` and connects to Postgres via `DATABASE_URL=postgres://mora:Omar.2005@db:5432/skillswap_db`.
-
-### Railway deployment
-
-- Deploy workflow: `.github/workflows/railway-deploy.yml`
-- Required GitHub secrets: `RAILWAY_TOKEN`, `RAILWAY_PROJECT_ID`, `RAILWAY_FRONTEND_SERVICE`, and `VITE_API_BASE_URL` (point this at the public backend URL, e.g., `https://your-backend.up.railway.app`).
-- Trigger: push to `main` or manual dispatch.
+## Common issues
+- Blank API responses: ensure the backend is reachable at `VITE_API_BASE_URL` or configure a dev proxy.
+- Auth loops: clear `localStorage` tokens if refresh fails.
+- CORS: set backend `FRONTEND_URL` to the origin serving this app.

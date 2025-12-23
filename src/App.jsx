@@ -9,6 +9,7 @@ import FeedPage from "./pages/FeedPage";
 import ProfilePage from "./pages/ProfilePage";
 import ChatPage from "./pages/chat";
 import ForgetPassPage from "./pages/ForgetPassPage";
+import FriendsPage from "./pages/FriendsPage";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 export default function App() {
@@ -28,8 +29,11 @@ export default function App() {
         {/* 📚 Learn More Page */}
         <Route path="/learn-more" element={<LearnMorePage />} />
 
-        {/* 📰 FEED PAGE (Protected) */}
-        <Route path="/feed" element={<ProtectedRoute><FeedPage /></ProtectedRoute>} />
+        {/* 📰 FEED PAGE (Public) */}
+        <Route path="/feed" element={<FeedPage />} />
+
+        {/* 👫 FRIENDS (Public) */}
+        <Route path="/friends" element={<FriendsPage />} />
 
         {/* 👤 PROFILE PAGE (Protected) */}
         <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
