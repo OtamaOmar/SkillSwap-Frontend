@@ -39,13 +39,6 @@ export default function FeedPage() {
     return `${base}/${url}`;
   };
 
-  // Authentication guard - redirect if not logged in
-  useEffect(() => {
-    if (!isAuthenticated()) {
-      navigate("/login", { replace: true });
-    }
-  }, [navigate]);
-
   const filteredSuggestions = useMemo(() => {
     const excludedIds = new Set(myFriends.map((f) => f.id));
     if (currentUser?.id) excludedIds.add(currentUser.id);
@@ -59,105 +52,120 @@ export default function FeedPage() {
 
   // Fetch current user, posts feed, and friend suggestions
   useEffect(() => {
+    const authed = isAuthenticated();
+
     const fetchData = async () => {
       setLoading(true);
       setError("");
-      let userProfile;
-      try {
-        // Fetch current user profile first (auth gate)
-        userProfile = await getCurrentUserProfile();
-        setCurrentUser(userProfile);
 
-        // Fetch posts feed (critical)
+      let userProfile = null;
+
+      if (authed) {
+        try {
+          userProfile = await getCurrentUserProfile();
+          setCurrentUser(userProfile);
+        } catch (err) {
+          console.error("FeedPage profile fetch error:", err);
+          setError(err.message || "Failed to load profile");
+          setCurrentUser(null);
+        }
+      } else {
+        setCurrentUser(null);
+      }
+
+      try {
         const feedPosts = await postAPI.getAllPosts();
         setPosts(Array.isArray(feedPosts) ? feedPosts : []);
       } catch (err) {
-        console.error("FeedPage critical fetch error:", err);
+        console.error("FeedPage feed fetch error:", err);
         setError(err.message || "Failed to load feed");
-        if (err.message?.toLowerCase().includes("token") || err.message?.toLowerCase().includes("authentication")) {
-          navigate("/login", { replace: true });
-        }
         setLoading(false);
         return;
       }
 
-      // Non-critical: friend suggestions (already filtered server-side to exclude existing relationships)
-      try {
-        const suggestionsRes = await friendshipsAPI.getSuggestions(8, 0);
-        const mapPending = (list) =>
-          (Array.isArray(list) ? list : []).map((u) => ({
-            ...u,
-            pending: pendingRequests.includes(u.id),
-          }));
-
-        if (Array.isArray(suggestionsRes?.suggestions) && suggestionsRes.suggestions.length > 0) {
-          setFriendSuggestions(mapPending(suggestionsRes.suggestions));
-        } else {
-          // Fallback: show any other users not already friends or self
-          const allUsers = await userAPI.getAllUsers();
-          const safeUsers = Array.isArray(allUsers)
-            ? allUsers.filter(u => u.id && u.id !== userProfile.id)
-            : [];
-          setFriendSuggestions(mapPending(safeUsers));
-        }
-      } catch (e) {
-        console.error("Friend suggestions failed (non-blocking)", e?.message || e, e);
+      if (authed) {
+        // Non-critical: friend suggestions (already filtered server-side to exclude existing relationships)
         try {
-          const allUsers = await userAPI.getAllUsers();
-          const safeUsers = Array.isArray(allUsers)
-            ? allUsers.filter(u => u.id && u.id !== userProfile.id)
-            : [];
-          setFriendSuggestions(
-            safeUsers.map((u) => ({ ...u, pending: pendingRequests.includes(u.id) }))
-          );
-        } catch {
-          setFriendSuggestions([]);
+          const suggestionsRes = await friendshipsAPI.getSuggestions(8, 0);
+          const mapPending = (list) =>
+            (Array.isArray(list) ? list : []).map((u) => ({
+              ...u,
+              pending: pendingRequests.includes(u.id),
+            }));
+
+          if (Array.isArray(suggestionsRes?.suggestions) && suggestionsRes.suggestions.length > 0) {
+            setFriendSuggestions(mapPending(suggestionsRes.suggestions));
+          } else {
+            // Fallback: show any other users not already friends or self
+            const allUsers = await userAPI.getAllUsers();
+            const safeUsers = Array.isArray(allUsers)
+              ? allUsers.filter(u => u.id && u.id !== userProfile?.id)
+              : [];
+            setFriendSuggestions(mapPending(safeUsers));
+          }
+        } catch (e) {
+          console.error("Friend suggestions failed (non-blocking)", e?.message || e, e);
+          try {
+            const allUsers = await userAPI.getAllUsers();
+            const safeUsers = Array.isArray(allUsers)
+              ? allUsers.filter(u => u.id && u.id !== userProfile?.id)
+              : [];
+            setFriendSuggestions(
+              safeUsers.map((u) => ({ ...u, pending: pendingRequests.includes(u.id) }))
+            );
+          } catch {
+            setFriendSuggestions([]);
+          }
         }
-      }
 
-      // Fetch accepted friendships (My Friends)
-      try {
-        const connectionsRes = await friendshipsAPI.getMyFriendships();
-        const connections = Array.isArray(connectionsRes?.connections)
-          ? connectionsRes.connections.map(c => ({
-              id: c.user?.id,
-              username: c.user?.username,
-              full_name: c.user?.full_name,
-              avatar_url: c.user?.avatar_url,
-            }))
-          : [];
-        setMyFriends(connections);
-      } catch (e) {
-        console.error("My friends fetch failed (non-blocking)", e?.message || e);
+        // Fetch accepted friendships (My Friends)
+        try {
+          const connectionsRes = await friendshipsAPI.getMyFriendships();
+          const connections = Array.isArray(connectionsRes?.connections)
+            ? connectionsRes.connections.map(c => ({
+                id: c.user?.id,
+                username: c.user?.username,
+                full_name: c.user?.full_name,
+                avatar_url: c.user?.avatar_url,
+              }))
+            : [];
+          setMyFriends(connections);
+        } catch (e) {
+          console.error("My friends fetch failed (non-blocking)", e?.message || e);
+          setMyFriends([]);
+        }
+
+        try {
+          const notifs = await notificationsAPI.getNotifications();
+          setNotifications(Array.isArray(notifs) ? notifs : []);
+          const unread = await notificationsAPI.getUnreadCount();
+          setUnreadCount(unread?.unread_count || 0);
+        } catch (e) {
+          console.warn("Notifications fetch failed (non-blocking)", e?.message || e);
+          setNotifications([]);
+          setUnreadCount(0);
+        }
+
+        try {
+          const incoming = await friendshipsAPI.getIncomingRequests();
+          setIncomingRequests(incoming?.requests || []);
+        } catch (e) {
+          console.warn("Incoming requests fetch failed (non-blocking)", e?.message || e);
+          setIncomingRequests([]);
+        }
+      } else {
+        setFriendSuggestions([]);
         setMyFriends([]);
-      }
-
-      try {
-        const notifs = await notificationsAPI.getNotifications();
-        setNotifications(Array.isArray(notifs) ? notifs : []);
-        const unread = await notificationsAPI.getUnreadCount();
-        setUnreadCount(unread?.unread_count || 0);
-      } catch (e) {
-        console.warn("Notifications fetch failed (non-blocking)", e?.message || e);
         setNotifications([]);
         setUnreadCount(0);
+        setIncomingRequests([]);
       }
 
-      try {
-        const incoming = await friendshipsAPI.getIncomingRequests();
-        setIncomingRequests(incoming?.requests || []);
-      } catch (e) {
-        console.warn("Incoming requests fetch failed (non-blocking)", e?.message || e);
-        setIncomingRequests([]);
-      } finally {
-        setLoading(false);
-      }
+      setLoading(false);
     };
 
-    if (isAuthenticated()) {
-      fetchData();
-    }
-  }, [navigate, pendingRequests]);
+    fetchData();
+  }, [pendingRequests]);
 
   // DARK MODE
   useEffect(() => {
@@ -515,7 +523,7 @@ export default function FeedPage() {
           <div className="flex flex-col gap-2">
             <SidebarButton icon={<Menu />} text="Toggle" sidebarOpen={sidebarOpen} onClick={() => setSidebarOpen(!sidebarOpen)} hidden={true} />
             <SidebarButton icon={<Home />} text="Feed" sidebarOpen={sidebarOpen} onClick={() => navigate("/feed")} />
-            <SidebarButton icon={<Users />} text="Friends" sidebarOpen={sidebarOpen} />
+            <SidebarButton icon={<Users />} text="Friends" sidebarOpen={sidebarOpen} onClick={() => navigate("/friends")} />
             <SidebarButton icon={<Mail/>} text="Messages" sidebarOpen={sidebarOpen}onClick={() => navigate("/chat")} />
           </div>
              
