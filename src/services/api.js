@@ -1,13 +1,14 @@
 
 import axios from "axios";
 
-// Use VITE_API_BASE_URL if set, else fallback to production API URL
-const BASE_URL = import.meta.env?.VITE_API_BASE_URL || "http://skillswap-app.duckdns.org/api";
+const BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
-// Use relative API paths if running in Docker (proxy), else use BASE_URL
-const useRelative = !import.meta.env?.VITE_API_BASE_URL;
-const API_URL = useRelative ? "/api" : BASE_URL;
-const AUTH_URL = useRelative ? "/auth" : `${BASE_URL.replace(/\/api$/, '')}/auth`;
+export const api = axios.create({
+  baseURL: BASE_URL,
+  withCredentials: true,
+});
+const API_URL = BASE_URL;
+const AUTH_URL = `${BASE_URL}/auth`;
 
 // Create axios instance
 const axiosInstance = axios.create({
